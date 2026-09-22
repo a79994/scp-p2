@@ -21,7 +21,8 @@ Originally formulated by Edsger Dijkstra in 1965 as an examination question rega
 * **Forks:** Exactly $N$ discrete, shared, mutually exclusive logical resources. The scarcity stems from the constraint that each entity must simultaneously acquire **two adjacent items** ($fork_i$ and $fork_{(i+1) \pmod N}$) to perform its critical section (*Eating*), precluding concurrent execution with immediate neighbors.
 
 ### 2.3 Real-World Example
-* **Automated Manufacturing Workstations / Dual Robotic Arms:** Consider two high-precision robotic arms working on adjacent assembly lines that share intermediate tools (e.g., a shared optical calibration sensor and a specialized soldering head positioned between them). If Arm A locks the optical sensor while requesting the soldering head, and Arm B locks the soldering head while awaiting the optical sensor, a hardware deadlock occurs, halting the production line.
+* **Dijkstra's Original 1965 Hardware Dilemma (Dual-Drive Data Transfers):**
+  * In Dijkstra's original hardware scenario, five mainframe computers arranged in a ring shared five magnetic tape drive peripherals positioned between them. A batch processing job on computer $i$ required reading from tape drive $i$ while simultaneously writing output to tape drive $(i+1) \pmod 5$. If every computer mounted its left tape drive and waited for its right tape drive to become free, a total system freeze occurred.
 
 ---
 
@@ -42,3 +43,16 @@ Originally formulated by Edsger Dijkstra in 1965 as an examination question rega
 4. **Global State / Monitor Approach (Tanenbaum's Solution):**
    * *Mechanism:* Explicit states are tracked for every philosopher (*THINKING*, *HUNGRY*, *EATING*). A philosopher is only permitted to transition to *EATING* if neither of their immediate neighbors is currently eating. If blocked, the philosopher releases any claims and waits on a condition variable or individual synchronization barrier without retaining partial resources.
    * *Outcome:* Completely eliminates the "hold-and-wait" condition.
+
+## 4. References and Original Problem
+
+* **Original Problem Formulation:** Originally formulated by Edsger W. Dijkstra in 1965 as an examination question concerning five computers competing for access to five shared tape drive peripherals arranged in a circle. Dijkstra formally published the problem and semaphore solutions in 1971:
+  * Dijkstra, E. W. (1971). *Hierarchical ordering of sequential processes*. Acta Informatica, 1(2), 115–138. [https://doi.org/10.1007/BF00289519](https://doi.org/10.1007/BF00289519) (Also transcribed as [EWD310](http://www.cs.utexas.edu/users/EWD/transcriptions/EWD03xx/EWD310.html)).
+  * Dijkstra, E. W. (1965). *Cooperating Sequential Processes* (EWD123). Technological University, Eindhoven. [http://www.cs.utexas.edu/users/EWD/transcriptions/EWD01xx/EWD123.html](http://www.cs.utexas.edu/users/EWD/transcriptions/EWD01xx/EWD123.html)
+* **The Dining Philosophers Metaphor:** C.A.R. Hoare adapted Dijkstra's five computers/tape drives problem into the famous dining philosophers metaphor with spaghetti and forks:
+  * Hoare, C. A. R. (1978). *Communicating Sequential Processes*. Communications of the ACM, 21(8), 666–677. [https://doi.org/10.1145/359576.359585](https://doi.org/10.1145/359576.359585)
+* **Deadlock Conditions & Concurrency Theory:** 
+  * Coffman, E. G., Elphick, M., & Shoshani, A. (1971). *System Deadlocks*. ACM Computing Surveys (CSUR), 3(2), 67–78. [https://doi.org/10.1145/356586.356588](https://doi.org/10.1145/356586.356588)
+* **Parallel Computing Context & Shared-Memory Contention:**
+  * Eijkhout, V. (2022). *The Art of HPC, Book 1: The Science of Computing*. [https://theartofhpc.com/istc.html](https://theartofhpc.com/istc.html)
+  * Eijkhout, V. (2022). *The Art of HPC, Book 2: Parallel Programming for Science and Engineering*. [https://theartofhpc.com/pcse.html](https://theartofhpc.com/pcse.html)
