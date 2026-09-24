@@ -48,14 +48,20 @@ The Sleeping-Barber problem models a multi-server queueing system with bounded w
 
 ## 3. Well-Known Solutions
 
-1. **Dijkstra's Canonical Three-Semaphore Pattern (Single Barber, $K=1$):**
+1. **Dijkstra's Three-Semaphore Sleeping Barber Algorithm (Single Barber, $K=1$)**
+   * *Proposed by:* Edsger W. Dijkstra (1965)
+   * *Bibliographic Reference:* Dijkstra, E. W. (1965). *Cooperating Sequential Processes* (EWD123). Section 4.2 ("The Superfluity of the General Semaphore"), Technological University, Eindhoven. [http://www.cs.utexas.edu/users/EWD/transcriptions/EWD01xx/EWD123.html](http://www.cs.utexas.edu/users/EWD/transcriptions/EWD01xx/EWD123.html)
    * *Mechanism:* Uses three synchronization primitives:
      1. `customers` semaphore (initialized to 0): increments when a customer enters the waiting room and wakes the barber.
      2. `barber` semaphore (initialized to 0): signals that the barber is ready to accept a customer.
      3. `mutex` binary semaphore (initialized to 1): guarantees mutual exclusion around the shared counter `waiting_chairs_count`.
    * *Outcome:* Elegantly solves lost wakeups and atomic waiting room capacity tracking for the single-server baseline without busy waiting.
 
-2. **Multi-Barber Synchronization with Queue Rendezvous ($K > 1$):**
+2. **Downey's Multi-Barber Queue Rendezvous & Private Semaphore Algorithm ($K > 1$)**
+   * *Proposed by:* Allen B. Downey (2005/2008), adapting the private semaphore pattern formalized by Kenneth A. Reek (2004)
+   * *Bibliographic Reference:*
+     * Downey, A. B. (2008). *The Little Book of Semaphores* (2nd ed.). Green Tea Press. Section 5.5: "The Barbershop Problem" and "The Multi-Barber Problem". [https://greenteapress.com/semaphores/](https://greenteapress.com/semaphores/)
+     * Reek, K. A. (2004). *Design Patterns for Semaphores*. Proceedings of the 35th SIGCSE Technical Symposium on Computer Science Education, 36(1), 288–292. [https://doi.org/10.1145/971300.971399](https://doi.org/10.1145/971300.971399)
    * *Mechanism:* Extends the model to coordinate multiple barbers:
      1. A counting semaphore `barbers_available` (initialized to $K$) tracking idle barbers.
      2. A counting semaphore `customers_waiting` (initialized to 0).
@@ -63,7 +69,11 @@ The Sleeping-Barber problem models a multi-server queueing system with bounded w
      4. A bidirectional double handshake (`customer_seated`, `haircut_completed`) between the specific barber-customer pair.
    * *Outcome:* Completely eliminates cross-barber race conditions and ensures that each customer binds to exactly one chair and one barber.
 
-3. **Monitor-Based Solution with Explicit Condition Variables:**
+3. **Brinch Hansen & Hoare's Monitor Sleeping Barber Algorithm**
+   * *Proposed by:* Per Brinch Hansen (1973) and C. A. R. (Tony) Hoare (1974)
+   * *Bibliographic Reference:*
+     * Brinch Hansen, P. (1973). *Operating System Principles*. Prentice Hall. Chapter 3: "Concurrent Processes".
+     * Hoare, C. A. R. (1974). *Monitors: An Operating System Structuring Concept*. Communications of the ACM, 17(10), 549–557. [https://doi.org/10.1145/355620.361161](https://doi.org/10.1145/355620.361161)
    * *Mechanism:* Encapsulates the entire shop state inside a monitor object using mutex locks and condition variables (`cond_barber_sleep`, `cond_customer_wait`, `cond_haircut_done[K]`). State variables explicitly record which chairs are occupied and which barbers are free.
    * *Outcome:* Avoids low-level semaphore signaling errors and simplifies implementing fair FIFO dispatching policies.
 
@@ -71,11 +81,38 @@ The Sleeping-Barber problem models a multi-server queueing system with bounded w
 
 ## 4. References and Original Problem
 
-* **Original Single-Barber Formulation (Dijkstra, 1965):** Edsger W. Dijkstra introduced the problem in Section 4.2 ("The Superfluity of the General Semaphore") of his seminal manuscript, defining it with one barber, one barber chair, and an entry/exit sliding door:
-  * Dijkstra, E. W. (1965). *Cooperating Sequential Processes* (EWD123). Technological University, Eindhoven. [http://www.cs.utexas.edu/users/EWD/transcriptions/EWD01xx/EWD123.html](http://www.cs.utexas.edu/users/EWD/transcriptions/EWD01xx/EWD123.html)
-* **Multi-Barber Extensions and Semaphore Patterns:**
-  * Downey, A. B. (2008). *The Little Book of Semaphores* (2nd ed.). Green Tea Press. Section 5.5: The Barbershop Problem and Multi-Barber generalizations. [https://greenteapress.com/semaphores/](https://greenteapress.com/semaphores/)
+* **Original Single-Barber Formulation:**
+  * Dijkstra, E. W. (1965). *Cooperating Sequential Processes* (EWD123). Section 4.2 ("The Superfluity of the General Semaphore"), Technological University, Eindhoven. [http://www.cs.utexas.edu/users/EWD/transcriptions/EWD01xx/EWD123.html](http://www.cs.utexas.edu/users/EWD/transcriptions/EWD01xx/EWD123.html)
+* **Multi-Barber Generalization & Semaphore Patterns:**
+  * Downey, A. B. (2008). *The Little Book of Semaphores* (2nd ed.). Green Tea Press. Section 5.5: "The Barbershop Problem" and "The Multi-Barber Problem". [https://greenteapress.com/semaphores/](https://greenteapress.com/semaphores/)
+  * Reek, K. A. (2004). *Design Patterns for Semaphores*. Proceedings of the 35th SIGCSE Technical Symposium on Computer Science Education, 36(1), 288–292. [https://doi.org/10.1145/971300.971399](https://doi.org/10.1145/971300.971399)
+* **Monitor Abstraction & Structured Synchronization:**
+  * Brinch Hansen, P. (1973). *Operating System Principles*. Prentice Hall. Chapter 3: "Concurrent Processes".
+  * Hoare, C. A. R. (1974). *Monitors: An Operating System Structuring Concept*. Communications of the ACM, 17(10), 549–557. [https://doi.org/10.1145/355620.361161](https://doi.org/10.1145/355620.361161)
 * **Queueing and Operating System Synchronization:**
   * Stallings, W. (2008). *Operating Systems: Internals and Design Principles* (6th ed.). Prentice Hall. Chapter 5: Concurrency: Mutual Exclusion and Synchronization.
 * **Workload Distribution & Overdecomposition:**
   * Eijkhout, V. (2022). *The Art of HPC, Book 2: Parallel Programming for Science and Engineering*. [https://theartofhpc.com/pcse.html](https://theartofhpc.com/pcse.html)
+
+---
+
+## 5. Implemented Solution
+
+The implemented solution is based on **Downey's Multi-Barber Queue Rendezvous & Private Semaphore Algorithm (WKS 2)**, supporting any number of barbers ($K \ge 1$) and waiting chairs ($M \ge 0$):
+
+* **Idle Barber Pool & Chair Dispatch (`idle_barbers_queue`):**
+  * Idle barbers push their chair ID $k \in \{0, \dots, K-1\}$ into a thread-safe FIFO queue and signal `idle_barbers_sem`.
+  * Arriving or waiting customers pop an available barber ID from the queue, binding deterministically to exactly one barber without cross-barber contention.
+
+* **Double-Handshake Rendezvous (Private Semaphores):**
+  * `sem_t customer_seated[K]`: The customer sits in chair $k$ and signals the assigned barber to begin the haircut.
+  * `sem_t haircut_done[K]`: The barber cuts hair and signals the customer that the haircut is complete.
+  * `sem_t customer_left[K]`: The customer pays, vacates chair $k$, and signals the barber, who can then return to the idle queue or serve the next waiting customer.
+
+* **Waiting Room Capacity & Balking:**
+  * Protected by `pthread_mutex_t lock`. If all $M$ waiting chairs are occupied and all barbers are busy, incoming customers immediately **balk** and depart.
+
+* **Invariant Guarantees:**
+  * **Exclusivity:** Exactly one customer occupies chair $k$ at any time (`chair_occupant[k] != -1`).
+  * **No Lost Wakeups:** Idle barbers wake up reliably as customers arrive.
+  * **Conservation:** Every arriving customer is accounted for: $\text{Served} + \text{Balked} = \text{Total Customers}$.

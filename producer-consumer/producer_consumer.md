@@ -22,9 +22,7 @@ The Producer-Consumer problem models the temporal decoupling of tasks that produ
 * **Consumers:** Autonomous active threads that retrieve payloads from the buffer and execute the required computation or storage.
 
 ### 2.2 Scarce Resources
-* **Empty Buffer Slots:** A scarce capacity resource required by producers before an insertion can take place; exhaustion of empty slots halts producer execution.
-* **Filled Buffer Slots (Available Items):** A scarce data resource required by consumers before extraction can proceed; exhaustion of filled slots halts consumer execution.
-* **Buffer Structure Integrity:** Mutually exclusive access to shared internal pointers (such as `head`, `tail`, and `count`) during modification operations in multi-producer / multi-consumer topologies.
+* **The Bounded Buffer:** A single shared circular storage structure with a finite capacity of $K$ slots. Scarcity stems from the buffer's limited size and unified state:
 
 ---
 
@@ -35,28 +33,55 @@ The Producer-Consumer problem models the temporal decoupling of tasks that produ
 
 ## 3. Well-Known Solutions
 
-1. **Dijkstra's Canonical Semaphore Solution (EWD123):**
+1. **Dijkstra's Counting Semaphore Bounded-Buffer Algorithm**
+   * *Proposed by:* Edsger W. Dijkstra (1965)
+   * *Bibliographic Reference:* Dijkstra, E. W. (1965). *Cooperating Sequential Processes* (EWD123). Technological University, Eindhoven. Reprinted in F. Genuys (Ed.), *Programming Languages*, Academic Press, 1968, pp. 43–112. [http://www.cs.utexas.edu/users/EWD/transcriptions/EWD01xx/EWD123.html](http://www.cs.utexas.edu/users/EWD/transcriptions/EWD01xx/EWD123.html)
    * *Mechanism:* Employs three synchronization primitives:
      1. Counting semaphore initialized to $K$ (`number of empty positions` in Dijkstra's formulation), tracking empty slots.
      2. Counting semaphore initialized to $0$ (`number of queuing portions`), tracking ready items.
      3. Binary semaphore (or mutex, `buffer manipulation` in EWD123, initialized to 1), enforcing mutual exclusion around enqueue/dequeue critical sections.
    * *Outcome:* Cleanly separates resource capacity tracking from critical section access protection.
 
-2. **Monitors with Condition Variables (Hoare's Pattern):**
+2. **Hoare's Monitor Bounded-Buffer Algorithm**
+   * *Proposed by:* C. A. R. (Tony) Hoare (1974)
+   * *Bibliographic Reference:* Hoare, C. A. R. (1974). *Monitors: An Operating System Structuring Concept*. Communications of the ACM, 17(10), 549–557. [https://doi.org/10.1145/355620.361161](https://doi.org/10.1145/355620.361161)
    * *Mechanism:* Encapsulates the bounded buffer along with its access methods within a thread-safe monitor. Uses two condition variables typically named `not_full` and `not_empty`. Producers wait on `not_full` and signal `not_empty`; consumers wait on `not_empty` and signal `not_full`.
    * *Outcome:* High-level language abstraction that eliminates low-level semaphore ordering pitfalls (such as accidentally reversing the order of `P(empty)` and `P(mutex)`, which causes deadlock).
 
-3. **Lock-Free Single-Producer Single-Consumer (SPSC) Ring Buffers:**
-   * *Mechanism:* In the original single-producer single-consumer scenario, circular buffers can be implemented completely without locks or mutexes by separating the read pointer (written only by the consumer) and the write pointer (written only by the producer), coordinating visibility via atomic loads/stores with acquire-release memory fences.
+3. **Lamport's Lock-Free SPSC Circular Buffer Algorithm**
+   * *Proposed by:* Leslie Lamport (1977, 1983)
+   * *Bibliographic Reference:* 
+     * Lamport, L. (1977). *Proving the Correctness of Multiprocess Programs*. IEEE Transactions on Software Engineering, SE-3(2), 125–143. [https://doi.org/10.1109/TSE.1977.229904](https://doi.org/10.1109/TSE.1977.229904)
+     * Lamport, L. (1983). *Specifying Concurrent Program Modules*. ACM Transactions on Programming Languages and Systems (TOPLAS), 5(2), 190–222. [https://doi.org/10.1145/69624.357162](https://doi.org/10.1145/69624.357162)
+   * *Mechanism:* In the single-producer single-consumer scenario, circular buffers can be implemented completely without locks or mutexes by separating the read pointer (written only by the consumer) and the write pointer (written only by the producer), coordinating visibility via atomic loads/stores with acquire-release memory fences.
    * *Outcome:* Highly favored in ultra-low-latency environments (Linux kernel `kfifo`, audio streaming, network packet capture) because it avoids OS thread context switching and lock contention.
 
 ---
 
 ## 4. References and Original Problem
 
-* **Original Problem Formulation (Dijkstra, 1965):** Introduced by Edsger W. Dijkstra in his foundational paper to demonstrate the power of counting semaphores. Section 4.1 introduced the unbounded producer-consumer, while Section 4.3 formalized the symmetric Bounded Buffer:
+* **Dijkstra's Bounded Buffer & Counting Semaphores:**
   * Dijkstra, E. W. (1965). *Cooperating Sequential Processes* (EWD123). Technological University, Eindhoven. [http://www.cs.utexas.edu/users/EWD/transcriptions/EWD01xx/EWD123.html](http://www.cs.utexas.edu/users/EWD/transcriptions/EWD01xx/EWD123.html)
-* **High-Level Abstractions (Monitors & Condition Variables):**
+* **Monitor Abstraction & Condition Variables:**
   * Hoare, C. A. R. (1974). *Monitors: An Operating System Structuring Concept*. Communications of the ACM, 17(10), 549–557. [https://doi.org/10.1145/355620.361161](https://doi.org/10.1145/355620.361161)
+* **Lock-Free Non-Blocking SPSC Queues:**
+  * Lamport, L. (1977). *Proving the Correctness of Multiprocess Programs*. IEEE Transactions on Software Engineering, SE-3(2), 125–143. [https://doi.org/10.1109/TSE.1977.229904](https://doi.org/10.1109/TSE.1977.229904)
+  * Lamport, L. (1983). *Specifying Concurrent Program Modules*. ACM Transactions on Programming Languages and Systems (TOPLAS), 5(2), 190–222. [https://doi.org/10.1145/69624.357162](https://doi.org/10.1145/69624.357162)
 * **HPC Task Pipelines & Asynchronous Buffering:**
   * Eijkhout, V. (2022). *The Art of HPC, Book 2: Parallel Programming for Science and Engineering*. [https://theartofhpc.com/pcse.html](https://theartofhpc.com/pcse.html)
+
+---
+
+## 5. Implemented Solution
+
+The implemented solution is based on **Dijkstra's Counting Semaphore Bounded-Buffer Algorithm (Proposed by Edsger W. Dijkstra, 1965 - WKS 1)** for Multi-Producer Multi-Consumer (MPMC) Bounded Buffers:
+
+* **Capacity Tracking (Counting Semaphores):**
+  * `sem_t empty`: Initialized to buffer capacity $K$, tracking available free slots. Producers block on `sem_wait(&empty)` when the buffer is full, preventing buffer overflow.
+  * `sem_t full`: Initialized to $0$, tracking available ready items. Consumers block on `sem_wait(&full)` when the buffer is empty, preventing buffer underflow.
+
+* **Mutual Exclusion (Mutex):**
+  * `pthread_mutex_t lock`: Guards circular buffer pointer updates (`head`, `tail`, `count`) during enqueue and dequeue operations, ensuring internal ring-buffer integrity under concurrent access.
+
+* **Graceful Termination & Drain:**
+  * When all producers finish, a `shutdown` signal cascades through `full` semaphore wakeups, allowing consumers to completely drain all remaining buffered items before exiting cleanly without deadlocks.
