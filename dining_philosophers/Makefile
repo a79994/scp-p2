@@ -36,10 +36,10 @@ dirs:
 $(BUILD_DIR)/fork.o: $(SRC_DIR)/fork.c $(INC_DIR)/fork.h
 	$(CC) $(CFLAGS) -c $< -o $@
 
-$(BUILD_DIR)/philosopher.o: $(SRC_DIR)/philosopher.c $(INC_DIR)/philosopher.h $(INC_DIR)/fork.h
+$(BUILD_DIR)/philosopher.o: $(SRC_DIR)/philosopher.c $(INC_DIR)/philosopher.h $(INC_DIR)/fork.h $(INC_DIR)/protocol.h
 	$(CC) $(CFLAGS) -c $< -o $@
 
-$(BUILD_DIR)/main.o: $(MAIN_SRC) $(INC_DIR)/philosopher.h
+$(BUILD_DIR)/main.o: $(MAIN_SRC) $(INC_DIR)/philosopher.h $(INC_DIR)/protocol.h
 	$(CC) $(CFLAGS) -c $< -o $@
 
 # Link main binary

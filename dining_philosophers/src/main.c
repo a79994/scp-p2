@@ -78,17 +78,17 @@ int main(int argc, char **argv) {
     }
 
     printf("==============================================================\n");
-    printf("     DINING PHILOSOPHERS: WKS 1 (Asymmetric) + Fair FIFO     \n");
+    printf("  DINING PHILOSOPHERS: Process-Based (AF_UNIX) + Fair FIFO    \n");
     printf("==============================================================\n");
     printf(" Configuration:\n");
-    printf("  - Philosophers: %d\n", num_philosophers);
+    printf("  - Philosophers (Processes): %d\n", num_philosophers);
     if (duration_sec > 0) {
         printf("  - Mode: Timed duration (%d seconds)\n", duration_sec);
     } else {
         printf("  - Mode: Fixed meals (%d per philosopher)\n", max_meals);
     }
-    printf("  - Fork Policy: Dijkstra Asymmetry (Even: L->R, Odd: R->L)\n");
-    printf("  - Fairness: FIFO Ticket Locks (Starvation Prevention)\n");
+    printf("  - IPC: Shared-Nothing UNIX Domain Sockets (socketpair)\n");
+    printf("  - Fairness: FIFO Request Ordering (Starvation Prevention)\n");
     if (argc == 1) {
         printf("  - Parameters: Running with default settings. Command-line arguments\n");
         printf("          can be used to modify parameters (run with -help for details).\n");
@@ -102,18 +102,14 @@ int main(int argc, char **argv) {
         return 1;
     }
     g_table.verbose = verbose;
+    g_table.duration_sec = duration_sec;
 
     uint64_t start_time = get_time_us();
 
     if (table_start(&g_table) != 0) {
-        fprintf(stderr, "Failed to start philosopher threads.\n");
+        fprintf(stderr, "Failed to start philosopher processes.\n");
         table_destroy(&g_table);
         return 1;
-    }
-
-    if (duration_sec > 0) {
-        sleep(duration_sec);
-        table_stop(&g_table);
     }
 
     table_wait(&g_table);

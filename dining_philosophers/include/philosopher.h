@@ -2,7 +2,8 @@
 #define PHILOSOPHER_H
 
 #include "fork.h"
-#include <pthread.h>
+#include "protocol.h"
+#include <sys/types.h>
 #include <stdint.h>
 #include <stdbool.h>
 
@@ -16,15 +17,15 @@ typedef struct table_s table_t;
 
 typedef struct {
     int id;
-    table_t *table;
-    pthread_t thread;
+    pid_t pid;
+    int coordinator_sock;      /* Parent side of socketpair */
+    int child_sock;            /* Child side of socketpair (closed in parent) */
     philosopher_state_t state;
+    bool is_hungry;
+    uint64_t request_ticket;
 
     int left_fork_id;
     int right_fork_id;
-
-    fork_t *first_fork;
-    fork_t *second_fork;
 
     uint64_t meals_eaten;
     uint64_t total_wait_time_us;
@@ -36,6 +37,7 @@ typedef struct {
 } philosopher_t;
 
 typedef void (*state_change_cb)(table_t *table, int philosopher_id, philosopher_state_t old_state, philosopher_state_t new_state);
+typedef bool (*stop_check_cb)(table_t *table);
 
 struct table_s {
     int num_philosophers;
@@ -44,9 +46,11 @@ struct table_s {
 
     volatile bool stop_requested;
     int max_meals;
+    int duration_sec;
+    uint64_t next_ticket;
 
-    pthread_mutex_t state_lock;
     state_change_cb on_state_change;
+    stop_check_cb stop_check;
     void *user_data;
     bool verbose;
 };
@@ -56,8 +60,7 @@ void table_destroy(table_t *table);
 int table_start(table_t *table);
 void table_wait(table_t *table);
 void table_stop(table_t *table);
-void philosopher_set_state(philosopher_t *p, philosopher_state_t new_state);
-void *philosopher_routine(void *arg);
+void table_update_state(table_t *table, int philosopher_id, philosopher_state_t new_state);
 uint64_t get_time_us(void);
 
 #endif

@@ -25,7 +25,7 @@ int main(void) {
     }
 
     if (table_start(&table) != 0) {
-        fprintf(stderr, COLOR_RED "Failed to start threads!\n" COLOR_RESET);
+        fprintf(stderr, COLOR_RED "Failed to start processes!\n" COLOR_RESET);
         table_destroy(&table);
         return 1;
     }
