@@ -3,12 +3,17 @@
 #include <stdlib.h>
 #include <unistd.h>
 
+static const int TARGET_MEALS_PHIL_1 = 15;
+
+static bool check_phil1_target(table_t *table) {
+    return table->philosophers[1].meals_eaten >= (uint64_t)TARGET_MEALS_PHIL_1;
+}
+
 int main(void) {
     printf(COLOR_CYAN "=== [TEST CASE 2] Starvation Resistance Under Asymmetric Contention ===" COLOR_RESET "\n");
     init_test_watchdog(10);
 
     const int NUM_PHILOSOPHERS = 5;
-    const int TARGET_MEALS_PHIL_1 = 15;
 
     table_t table;
     if (table_init(&table, NUM_PHILOSOPHERS, 0) != 0) {
@@ -17,6 +22,7 @@ int main(void) {
     }
 
     table.on_state_change = mutual_exclusion_validator;
+    table.stop_check = check_phil1_target;
     table.verbose = false;
 
     table.philosophers[0].think_time_min_us = 0;
@@ -43,23 +49,11 @@ int main(void) {
 
     printf(" Starting simulation: Phil 0 & 2 are hyper-aggressive, Phil 1 is sandwiched...\n");
     if (table_start(&table) != 0) {
-        fprintf(stderr, COLOR_RED "Failed to start threads!\n" COLOR_RESET);
+        fprintf(stderr, COLOR_RED "Failed to start processes!\n" COLOR_RESET);
         table_destroy(&table);
         return 1;
     }
 
-    while (1) {
-        usleep(5000);
-        pthread_mutex_lock(&table.state_lock);
-        uint64_t phil1_meals = table.philosophers[1].meals_eaten;
-        pthread_mutex_unlock(&table.state_lock);
-
-        if (phil1_meals >= TARGET_MEALS_PHIL_1) {
-            break;
-        }
-    }
-
-    table_stop(&table);
     table_wait(&table);
     cancel_test_watchdog();
 
@@ -68,7 +62,7 @@ int main(void) {
         printf("  - Philosopher %d ate %lu meals\n", i, table.philosophers[i].meals_eaten);
     }
 
-    if (table.philosophers[1].meals_eaten < TARGET_MEALS_PHIL_1) {
+    if (table.philosophers[1].meals_eaten < (uint64_t)TARGET_MEALS_PHIL_1) {
         fprintf(stderr, COLOR_RED "[FAIL] Philosopher 1 was starved! Only got %lu meals!\n" COLOR_RESET,
                 table.philosophers[1].meals_eaten);
         table_destroy(&table);

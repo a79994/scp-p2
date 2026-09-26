@@ -90,14 +90,18 @@ Originally formulated by Edsger Dijkstra in 1965 as an examination question rega
 
 ## 5. Implemented Solution
 
-The implemented solution is based on **Dijkstra's Asymmetric Solution (Proposed by Edsger W. Dijkstra, 1971 - WKS 1)** combined with a **FIFO Ticket Queue** mechanism on each fork to prevent starvation:
+The implemented solution is based on an **autonomous process-based shared-nothing architecture** using **UNIX Domain Sockets (`AF_UNIX` via `socketpair`)** and a **Fair FIFO Request Ordering** mechanism managed by the Table Coordinator:
 
-* **Deadlock Prevention (Asymmetric Ordering):**
-  * Even-numbered philosophers ($i \pmod 2 == 0$) always pick up their left fork first, then their right fork.
-  * Odd-numbered philosophers ($i \pmod 2 == 1$) always pick up their right fork first, then their left fork.
-  * This breaks circular wait symmetry, making deadlocks impossible.
+* **Concurrency Model (Processes via `fork()`):**
+  * Philosophers are completely isolated child processes created via `fork()`.
+  * **Zero Shared Memory:** There are no shared heap pointers, shared memory segments, or threads (`pthreads`). Each process maintains its own address space.
+  * Inter-Process Communication (IPC) is strictly message-passing over full-duplex UNIX Domain sockets (`socketpair(AF_UNIX, SOCK_STREAM, 0, sv)`).
 
-* **Starvation Prevention (Fair FIFO Forks):**
-  * Standard mutexes do not guarantee FIFO order, which can allow aggressive neighbors to barge in and starve an intermediate philosopher.
-  * In this implementation, each fork is managed as a FIFO ticket lock using `pthread_mutex_t`, `pthread_cond_t`, and sequential ticket counters (`next_ticket` / `current_ticket`).
-  * Fork requests are served strictly in order of arrival, guaranteeing bounded waiting times and eliminating starvation.
+* **Deadlock Prevention (Coordinator Allocation):**
+  * The Table Coordinator process centrally arbitrates fork allocations based on non-preemptive availability and global request timestamps/tickets.
+  * A philosopher only transitions to the eating state when **both** adjacent forks are acquired atomically by the coordinator on its behalf, eliminating hold-and-wait circular deadlocks.
+
+* **Starvation Prevention (Fair FIFO Arrival Tickets):**
+  * When a philosopher sends a request (`MSG_REQ_FORKS`), it is assigned a sequential ticket number.
+  * The coordinator evaluates fork allocation strictly prioritizing earlier ticket requests, ensuring adjacent aggressive neighbors cannot bypass an intermediate hungry philosopher.
+  * Guarantees bounded waiting time and eliminates starvation (empirically verified by test case 2).
