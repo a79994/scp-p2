@@ -90,16 +90,16 @@ Originally formulated by Edsger Dijkstra in 1965 as an examination question rega
 
 ## 5. Implemented Solution
 
-The implemented solution is based on an **autonomous process-based shared-nothing architecture** using **UNIX Domain Sockets (`AF_UNIX` via `socketpair`)** and a **Fair FIFO Request Ordering** mechanism managed by the Table Coordinator:
+The implemented solution is based on an **autonomous process-based architecture** using **UNIX Domain Sockets (`AF_UNIX` via `socketpair`)** and a **Fair FIFO Request Ordering** mechanism managed by the Table Coordinator:
 
 * **Concurrency Model (Processes via `fork()`):**
   * Philosophers are completely isolated child processes created via `fork()`.
-  * **Zero Shared Memory:** There are no shared heap pointers, shared memory segments, or threads (`pthreads`). Each process maintains its own address space.
-  * Inter-Process Communication (IPC) is strictly message-passing over full-duplex UNIX Domain sockets (`socketpair(AF_UNIX, SOCK_STREAM, 0, sv)`).
+  * **Zero Shared Memory:** There are no shared heap pointers or memory segments. Each process maintains its own address space.
+  * Inter-Process Communication (IPC) is strictly message-passing over UNIX Domain sockets.
 
 * **Deadlock Prevention (Coordinator Allocation):**
-  * The Table Coordinator process centrally arbitrates fork allocations based on non-preemptive availability and global request timestamps/tickets.
-  * A philosopher only transitions to the eating state when **both** adjacent forks are acquired atomically by the coordinator on its behalf, eliminating hold-and-wait circular deadlocks.
+  * The Table Coordinator process arbitrates fork allocations based on non-preemptive availability and global request tickets.
+  * A philosopher only transitions to the eating state when **both** adjacent forks are acquired atomically by the coordinator on its behalf, eliminating circular deadlocks.
 
 * **Starvation Prevention (Fair FIFO Arrival Tickets):**
   * When a philosopher sends a request (`MSG_REQ_FORKS`), it is assigned a sequential ticket number.

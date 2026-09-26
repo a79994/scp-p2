@@ -72,6 +72,7 @@ void table_update_state(table_t *table, int philosopher_id, philosopher_state_t 
             const char *state_str = (new_state == STATE_THINKING) ? "THINKING" :
                                     (new_state == STATE_HUNGRY)   ? "HUNGRY  " :
                                                                     "EATING  ";
+                                                                    
             printf("[Time %8.2f ms] Philosopher %2d is now %s (meals: %lu)\n",
                    (double)get_time_us() / 1000.0, philosopher_id, state_str, p->meals_eaten);
         }

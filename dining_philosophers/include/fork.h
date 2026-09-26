@@ -6,7 +6,7 @@
 
 typedef struct {
     int id;
-    int holder_id;         /* -1 if unheld, philosopher_id if held */
+    int holder_id;
 } fork_t;
 
 int fork_init(fork_t *fork, int id);
@@ -15,4 +15,4 @@ bool fork_is_available(const fork_t *fork);
 void fork_assign(fork_t *fork, int philosopher_id);
 void fork_release_holder(fork_t *fork, int philosopher_id);
 
-#endif /* FORK_H */
+#endif

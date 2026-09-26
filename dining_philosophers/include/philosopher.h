@@ -63,4 +63,4 @@ void table_stop(table_t *table);
 void table_update_state(table_t *table, int philosopher_id, philosopher_state_t new_state);
 uint64_t get_time_us(void);
 
-#endif /* PHILOSOPHER_H */
+#endif
