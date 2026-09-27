@@ -18,6 +18,22 @@ uint64_t get_time_us(void) {
     return (uint64_t)ts.tv_sec * 1000000ULL + (uint64_t)ts.tv_nsec / 1000ULL;
 }
 
+void get_formatted_time(char *buffer, size_t buf_size) {
+    struct timespec ts;
+    struct tm tm_info;
+
+    clock_gettime(CLOCK_REALTIME, &ts);
+    localtime_r(&ts.tv_sec, &tm_info);
+
+    long centiseconds = ts.tv_nsec / 10000000L;
+
+    snprintf(buffer, buf_size, "%02d:%02d:%02d.%02ld",
+             tm_info.tm_hour,
+             tm_info.tm_min,
+             tm_info.tm_sec,
+             centiseconds);
+}
+
 static void random_delay(int min_us, int max_us, unsigned int *seed) {
     if (max_us <= 0) return;
     if (min_us < 0) min_us = 0;
@@ -73,8 +89,12 @@ void table_update_state(table_t *table, int philosopher_id, philosopher_state_t 
                                     (new_state == STATE_HUNGRY)   ? "HUNGRY  " :
                                                                     "EATING  ";
                                                                     
-            printf("[Time %8.2f ms] Philosopher %2d is now %s (meals: %lu)\n",
-                   (double)get_time_us() / 1000.0, philosopher_id, state_str, p->meals_eaten);
+            char time_str[12];
+
+            get_formatted_time(time_str, sizeof(time_str));
+            
+            printf("[Time %s] Philosopher %2d is now %s (meals: %lu)\n",
+                   time_str, philosopher_id, state_str, p->meals_eaten);
         }
     }
 }

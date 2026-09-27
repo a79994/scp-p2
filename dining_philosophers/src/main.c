@@ -87,8 +87,6 @@ int main(int argc, char **argv) {
     } else {
         printf("  - Mode: Fixed meals (%d per philosopher)\n", max_meals);
     }
-    printf("  - IPC: Shared-Nothing UNIX Domain Sockets (socketpair)\n");
-    printf("  - Fairness: FIFO Request Ordering (Starvation Prevention)\n");
     if (argc == 1) {
         printf("  - Parameters: Running with default settings. Command-line arguments\n");
         printf("          can be used to modify parameters (run with -help for details).\n");
