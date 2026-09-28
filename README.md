@@ -1,6 +1,6 @@
 # SCP - Practical Assignment 2: Classic Concurrency Problems
 
-This repository is dedicated to the theoretical analysis, formal criteria, and practical C implementation of classic synchronization and concurrency problems using **POSIX Threads (`pthread`)**.
+This repository is dedicated to the theoretical analysis, formal criteria, and practical C implementation of classic synchronization and concurrency problems using modern concurrency paradigms in Linux (both multi-process architectures with IPC and POSIX Threads).
 
 ---
 
@@ -8,12 +8,12 @@ This repository is dedicated to the theoretical analysis, formal criteria, and p
 
 The project is structured into modular directories, one for each concurrency problem:
 
-| Directory | Problem | Status |
-| :--- | :--- | :--- |
-| [`dining_philosophers/`](./dining_philosophers/) | Dining Philosophers | Implemented (Dijkstra's Asymmetric Algorithm + FIFO Forks) |
-| [`producer-consumer/`](./producer-consumer/) | Producer-Consumer | Implemented (Dijkstra's Counting Semaphore Bounded Buffer) |
-| [`readers_writers/`](./readers_writers/) | Readers-Writers | Implemented (Starvation-Free Fair Turnstile Algorithm) |
-| [`sleeping-barber/`](./sleeping-barber/) | Sleeping Barber | Implemented (Downey Multi-Barber Private Semaphore Algorithm) |
+| Directory | Problem | Concurrency Model | Synchronization / IPC Mechanism |
+| :--- | :--- | :--- | :--- |
+| [`dining_philosophers/`](./dining_philosophers/) | Dining Philosophers | **Processes (`fork`)** | UNIX Domain Sockets (`AF_UNIX`) + Fair FIFO Coordinator |
+| [`producer-consumer/`](./producer-consumer/) | Producer-Consumer | **Processes (`fork`)** | Dual UNIX Pipes IPC + Credit-Token Flow Control (Zero Shared Memory) |
+| [`readers_writers/`](./readers_writers/) | Readers-Writers | Threads (`pthread`) | Starvation-Free Fair Turnstile Algorithm (Semaphores / Mutexes) |
+| [`sleeping-barber/`](./sleeping-barber/) | Sleeping Barber | Threads (`pthread`) | Downey Multi-Barber Private Semaphore Algorithm |
 
 ---
 
@@ -23,7 +23,7 @@ Every problem directory follows the exact same architectural layout:
 
 ```
 <problem_name>/
-├── <problem_name>.md        # Theoretical specification, criteria, and solution details
+├── <problem_name>.md        # Theoretical specification, criteria, solutions, and bibliography
 ├── Makefile                 # Standardized build system (targets: all, test, clean)
 ├── include/                 # Header files (.h) defining structs and function interfaces
 ├── src/                     # Core solution source files (.c) and main.c entry point
@@ -60,11 +60,15 @@ The main executable is produced in the root of the problem folder and accepts co
 # Example with options (Dining Philosophers):
 ./dining_philosophers -n 5 -m 10 -v
 
-# Supported options:
-#   -n <num>       Number of entities/threads (default: 5)
-#   -m <meals>     Number of meals/cycles per entity (default: 5)
-#   -t <seconds>   Timed continuous duration mode (runs for T seconds)
-#   -v             Verbose output (logs every state transition)
+# Example with options (Producer-Consumer):
+./producer_consumer -p 3 -c 3 -b 5 -i 30 -v
+
+# Supported options (Producer-Consumer):
+#   -p <num>       Number of producer processes (default: 2)
+#   -c <num>       Number of consumer processes (default: 2)
+#   -b <size>      Buffer capacity (default: 5)
+#   -i <items>     Total items to produce (default: 20)
+#   -v             Verbose output (logs each produce/consume with PID)
 #   -help, -h      Display help message
 ```
 
@@ -77,7 +81,7 @@ make test
 ```bash
 cd test/cases
 ./case1_basic
-./case2_starvation_prevention
-./case3_high_contention
-./case4_two_philosophers
+./case2_fast_producers_slow_consumers
+./case3_slow_producers_fast_consumers
+./case4_high_concurrency
 ```

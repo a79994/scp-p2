@@ -9,6 +9,8 @@
 #include <stdbool.h>
 #include <unistd.h>
 #include <signal.h>
+#include <sys/wait.h>
+#include <fcntl.h>
 
 #define COLOR_RESET   "\033[0m"
 #define COLOR_RED     "\033[1;31m"
@@ -18,6 +20,7 @@
 static inline void timeout_watchdog_handler(int sig) {
     (void)sig;
     fprintf(stderr, COLOR_RED "\n[WATCHDOG TIMEOUT] Test exceeded deadline! A deadlock has occurred!\n" COLOR_RESET);
+    kill(0, SIGTERM);
     exit(3);
 }
 

@@ -8,21 +8,13 @@
 #include <getopt.h>
 #include <signal.h>
 #include <time.h>
+#include <sys/wait.h>
 
 typedef struct {
+    int entity_type; /* 0: Producer, 1: Consumer */
     int id;
-    buffer_t *buffer;
-    int items_to_produce;
-    int items_produced;
-    bool verbose;
-} producer_arg_t;
-
-typedef struct {
-    int id;
-    buffer_t *buffer;
-    int items_consumed;
-    bool verbose;
-} consumer_arg_t;
+    int items_handled;
+} process_report_t;
 
 static void print_usage(const char *prog) {
     printf("Usage: %s [options]\n", prog);
@@ -35,49 +27,69 @@ static void print_usage(const char *prog) {
     printf("  -help, -h      Show this help message\n");
 }
 
-static void *producer_routine(void *arg) {
-    producer_arg_t *p = (producer_arg_t *)arg;
-    unsigned int seed = (unsigned int)(time(NULL) ^ (p->id << 4) ^ pthread_self());
+static void producer_process(int id, buffer_t *b, int items_to_produce, bool verbose, int report_fd) {
+    buffer_close_producer_unused(b);
+    unsigned int seed = (unsigned int)(time(NULL) ^ (id << 8) ^ getpid());
+    int items_produced = 0;
 
-    for (int i = 0; i < p->items_to_produce; i++) {
+    for (int i = 0; i < items_to_produce; i++) {
         item_t item;
-        item.value = p->id * 10000 + i + 1;
-        item.producer_id = p->id;
+        item.value = id * 10000 + i + 1;
+        item.producer_id = id;
 
         int delay = 1000 + (rand_r(&seed) % 4000);
         usleep(delay);
 
-        if (buffer_push(p->buffer, item)) {
-            p->items_produced++;
-            if (p->verbose) {
-                printf("[Producer %2d] Produced item %5d (Buffer count: %d)\n",
-                       p->id, item.value, buffer_get_count(p->buffer));
+        if (buffer_push(b, item)) {
+            items_produced++;
+            if (verbose) {
+                printf("[Producer %2d (PID %d)] Produced item %5d (Buffer count: %d)\n",
+                       id, getpid(), item.value, buffer_get_count(b));
+                fflush(stdout);
             }
         } else {
             break;
         }
     }
 
-    return NULL;
+    process_report_t report = {
+        .entity_type = 0,
+        .id = id,
+        .items_handled = items_produced
+    };
+    (void)write(report_fd, &report, sizeof(report));
+    close(report_fd);
+    buffer_destroy(b);
+    exit(0);
 }
 
-static void *consumer_routine(void *arg) {
-    consumer_arg_t *c = (consumer_arg_t *)arg;
-    unsigned int seed = (unsigned int)(time(NULL) ^ (c->id << 6) ^ pthread_self());
+static void consumer_process(int id, buffer_t *b, bool verbose, int report_fd) {
+    buffer_close_consumer_unused(b);
+    unsigned int seed = (unsigned int)(time(NULL) ^ (id << 10) ^ getpid());
+    int items_consumed = 0;
 
     item_t item;
-    while (buffer_pop(c->buffer, &item)) {
-        c->items_consumed++;
-        if (c->verbose) {
-            printf("[Consumer %2d] Consumed item %5d from Producer %2d (Buffer count: %d)\n",
-                   c->id, item.value, item.producer_id, buffer_get_count(c->buffer));
+    while (buffer_pop(b, &item)) {
+        items_consumed++;
+        if (verbose) {
+            printf("[Consumer %2d (PID %d)] Consumed item %5d from Producer %2d (Buffer count: %d)\n",
+                   id, getpid(), item.value, item.producer_id, buffer_get_count(b));
+            fflush(stdout);
         }
 
         int delay = 1000 + (rand_r(&seed) % 4000);
         usleep(delay);
     }
 
-    return NULL;
+    process_report_t report = {
+        .entity_type = 1,
+        .id = id,
+        .items_handled = items_consumed
+    };
+    (void)write(report_fd, &report, sizeof(report));
+    close(report_fd);
+    buffer_destroy(b);
+    exit(0);
 }
 
 int main(int argc, char **argv) {
@@ -136,14 +148,13 @@ int main(int argc, char **argv) {
     }
 
     printf("==============================================================\n");
-    printf("     PRODUCER-CONSUMER: Dijkstra Canonical Semaphores        \n");
+    printf("     PRODUCER-CONSUMER: Process-Based (UNIX Pipes IPC)        \n");
     printf("==============================================================\n");
     printf(" Configuration:\n");
-    printf("  - Producers: %d\n", num_producers);
-    printf("  - Consumers: %d\n", num_consumers);
+    printf("  - Producers (Processes): %d\n", num_producers);
+    printf("  - Consumers (Processes): %d\n", num_consumers);
     printf("  - Buffer Capacity: %d slots\n", buffer_capacity);
     printf("  - Total Items: %d\n", total_items);
-    printf("  - Synchronization: Semaphores (empty=%d, full=0) + Mutex\n", buffer_capacity);
     if (argc == 1) {
         printf("  - Note: Running with default settings. Command-line arguments\n");
         printf("          can be used to modify parameters (run with -help for details).\n");
@@ -152,44 +163,102 @@ int main(int argc, char **argv) {
 
     buffer_t buffer;
     if (buffer_init(&buffer, buffer_capacity) != 0) {
-        fprintf(stderr, "Failed to initialize buffer.\n");
+        fprintf(stderr, "Failed to initialize bounded buffer.\n");
         return 1;
     }
 
-    pthread_t *prod_threads = malloc(sizeof(pthread_t) * num_producers);
-    producer_arg_t *prod_args = malloc(sizeof(producer_arg_t) * num_producers);
-    pthread_t *cons_threads = malloc(sizeof(pthread_t) * num_consumers);
-    consumer_arg_t *cons_args = malloc(sizeof(consumer_arg_t) * num_consumers);
+    /* Report pipe used by child processes to report summary statistics to parent */
+    int report_pipe[2];
+    if (pipe(report_pipe) != 0) {
+        fprintf(stderr, "Failed to create IPC report pipe.\n");
+        buffer_destroy(&buffer);
+        return 1;
+    }
+
+    pid_t *prod_pids = malloc(sizeof(pid_t) * num_producers);
+    pid_t *cons_pids = malloc(sizeof(pid_t) * num_consumers);
+    int *prod_counts = calloc(num_producers, sizeof(int));
+    int *cons_counts = calloc(num_consumers, sizeof(int));
 
     int base_items = total_items / num_producers;
     int remainder = total_items % num_producers;
 
+    struct timespec start_time, end_time;
+    clock_gettime(CLOCK_MONOTONIC, &start_time);
+
+    /* Fork producer processes */
     for (int i = 0; i < num_producers; i++) {
-        prod_args[i].id = i;
-        prod_args[i].buffer = &buffer;
-        prod_args[i].items_to_produce = base_items + (i < remainder ? 1 : 0);
-        prod_args[i].items_produced = 0;
-        prod_args[i].verbose = verbose;
-        pthread_create(&prod_threads[i], NULL, producer_routine, &prod_args[i]);
+        int items_to_produce = base_items + (i < remainder ? 1 : 0);
+        pid_t pid = fork();
+        if (pid < 0) {
+            perror("fork producer failed");
+            exit(1);
+        }
+        if (pid == 0) {
+            /* In child producer process */
+            close(report_pipe[0]);
+            free(prod_pids);
+            free(cons_pids);
+            free(prod_counts);
+            free(cons_counts);
+            producer_process(i, &buffer, items_to_produce, verbose, report_pipe[1]);
+        }
+        prod_pids[i] = pid;
     }
 
+    /* Fork consumer processes */
     for (int i = 0; i < num_consumers; i++) {
-        cons_args[i].id = i;
-        cons_args[i].buffer = &buffer;
-        cons_args[i].items_consumed = 0;
-        cons_args[i].verbose = verbose;
-        pthread_create(&cons_threads[i], NULL, consumer_routine, &cons_args[i]);
+        pid_t pid = fork();
+        if (pid < 0) {
+            perror("fork consumer failed");
+            exit(1);
+        }
+        if (pid == 0) {
+            /* In child consumer process */
+            close(report_pipe[0]);
+            free(prod_pids);
+            free(cons_pids);
+            free(prod_counts);
+            free(cons_counts);
+            consumer_process(i, &buffer, verbose, report_pipe[1]);
+        }
+        cons_pids[i] = pid;
     }
 
+    /* Parent closes its write descriptor of report pipe */
+    close(report_pipe[1]);
+
+    /* Wait for all producers to finish production */
     for (int i = 0; i < num_producers; i++) {
-        pthread_join(prod_threads[i], NULL);
+        int status;
+        waitpid(prod_pids[i], &status, 0);
     }
 
+    /* Gracefully shutdown buffer: closes items_pipe write end in parent.
+     * All producers have finished, so once consumers drain items, they receive EOF.
+     */
     buffer_shutdown(&buffer);
 
+    /* Wait for all consumers to complete */
     for (int i = 0; i < num_consumers; i++) {
-        pthread_join(cons_threads[i], NULL);
+        int status;
+        waitpid(cons_pids[i], &status, 0);
     }
+    clock_gettime(CLOCK_MONOTONIC, &end_time);
+
+    double elapsed_ms = (end_time.tv_sec - start_time.tv_sec) * 1000.0 +
+                        (end_time.tv_nsec - start_time.tv_nsec) / 1000000.0;
+
+    /* Read reports from child processes via report pipe */
+    process_report_t rep;
+    while (read(report_pipe[0], &rep, sizeof(rep)) == sizeof(rep)) {
+        if (rep.entity_type == 0 && rep.id >= 0 && rep.id < num_producers) {
+            prod_counts[rep.id] = rep.items_handled;
+        } else if (rep.entity_type == 1 && rep.id >= 0 && rep.id < num_consumers) {
+            cons_counts[rep.id] = rep.items_handled;
+        }
+    }
+    close(report_pipe[0]);
 
     int total_produced = 0;
     int total_consumed = 0;
@@ -201,26 +270,25 @@ int main(int argc, char **argv) {
     printf("----------------+-----------------+---------\n");
 
     for (int i = 0; i < num_producers; i++) {
-        total_produced += prod_args[i].items_produced;
-        printf(" Producer %-5d | %-15d | %-8s\n", i, prod_args[i].items_produced, "OK");
+        total_produced += prod_counts[i];
+        printf(" Producer %-5d | %-15d | %-8s\n", i, prod_counts[i], "OK");
     }
 
     for (int i = 0; i < num_consumers; i++) {
-        total_consumed += cons_args[i].items_consumed;
-        printf(" Consumer %-5d | %-15d | %-8s\n", i, cons_args[i].items_consumed, "OK");
+        total_consumed += cons_counts[i];
+        printf(" Consumer %-5d | %-15d | %-8s\n", i, cons_counts[i], "OK");
     }
 
     printf("==============================================================\n");
-    printf(" Total Produced: %d | Total Consumed: %d\n", total_produced, total_consumed);
-    printf(" Invariants Checked: Bounds (0 <= count <= %d) | Data Integrity (%s)\n",
-           buffer_capacity, (total_produced == total_consumed && total_produced == total_items) ? "OK" : "FAIL");
+    printf(" Elapsed Time: %.2f ms | Total Produced: %d | Total Consumed: %d\n",
+           elapsed_ms, total_produced, total_consumed);
     printf("==============================================================\n");
 
     buffer_destroy(&buffer);
-    free(prod_threads);
-    free(prod_args);
-    free(cons_threads);
-    free(cons_args);
+    free(prod_pids);
+    free(cons_pids);
+    free(prod_counts);
+    free(cons_counts);
 
     return 0;
 }
