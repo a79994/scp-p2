@@ -98,18 +98,9 @@ The Producer-Consumer problem models the temporal decoupling of tasks that produ
 
 ## 5. Implemented Solution
 
-The implemented solution is a **Process-Based Multi-Producer Multi-Consumer (MPMC) Bounded Buffer** utilizing **Dual UNIX Pipes IPC** with **Credit-Token Flow-Control**, intentionally distinct from shared-memory approaches and from the domain socket architecture used in Dining Philosophers:
+The implemented solution is a **Process-Based Multi-Producer Multi-Consumer (MPMC) Bounded Buffer** utilizing **Dual UNIX Pipes IPC** with **Credit-Token Flow-Control**:
 
-### 5.1 Architecture & Design Decisions
-1. **Multi-Process Model (`fork()`):**
-   * Each Producer and Consumer is a distinct operating system process with its own private virtual memory address space and PID.
-2. **Zero Shared Memory (`NO mmap`, `NO shmget`, `NO shm_open`):**
-   * All synchronization and data exchange are conducted strictly through operating system kernel communication channels (pipes), providing memory safety and fault isolation.
-3. **Distinct from Dining Philosophers Solution:**
-   * Dining Philosophers was implemented with UNIX Domain Sockets (`AF_UNIX`) and a centralized coordinator server daemon managing state requests.
-   * Producer-Consumer is implemented with **Dual UNIX Pipes** operating directly between peer processes without any centralized coordinator server.
-
-### 5.2 Dual Pipe Channel Synchronization
+### 5.1 Dual Pipe Channel Synchronization
 The bounded buffer employs two unidirectional kernel pipes:
 * **Data Channel (`items_pipe`):**
   * Carries `item_t` payloads from producer processes to consumer processes.
@@ -120,14 +111,8 @@ The bounded buffer employs two unidirectional kernel pipes:
   * Before writing to `items_pipe`, a producer must consume 1 credit token from `slots_pipe[0]`. If the buffer has $K$ items (full), `slots_pipe` is empty, causing the producer to block on `read()`, preventing buffer overflow.
   * When a consumer pops an item from `items_pipe`, it writes 1 credit token back into `slots_pipe[1]`, unblocking any waiting producer.
 
-### 5.3 Correctness Invariants
-* **Strict Boundedness:**
-  $$\text{tokens}_{\text{slots}} + \text{items}_{\text{buffer}} = K \implies 0 \le \text{count} \le K$$
+### 5.2 Correctness Invariants
 * **Atomicity & Mutual Exclusion:**
   * By POSIX.1-2008 specification, write operations of size $\le \text{PIPE\_BUF}$ (4096 bytes on Linux) are guaranteed to be atomic. Since `sizeof(item_t) = 8` bytes $\ll \text{PIPE\_BUF}$, concurrent writes and reads from multiple processes never interleave or corrupt data.
-* **Clean Termination (EOF-Driven):**
-  * When all producers finish and exit, the parent process calls `buffer_shutdown()`, closing its write descriptor to `items_pipe`.
-  * Because consumers close their unused write descriptor at start, the reference count of writers for `items_pipe` reaches zero.
-  * As a result, all waiting consumers automatically receive `EOF` (`read() == 0`) once all pending items have been drained, exiting gracefully without deadlock or spinlocks.
 * **Result Aggregation via IPC Report Pipe:**
   * Summary metrics (`items_produced`, `items_consumed`) are reported back to the parent process via a dedicated IPC report pipe without needing shared memory.
