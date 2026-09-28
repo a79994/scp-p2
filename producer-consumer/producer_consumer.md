@@ -76,12 +76,9 @@ The Producer-Consumer problem models the temporal decoupling of tasks that produ
 
 The implemented solution is based on **Dijkstra's Counting Semaphore Bounded-Buffer Algorithm (Proposed by Edsger W. Dijkstra, 1965 - WKS 1)** for Multi-Producer Multi-Consumer (MPMC) Bounded Buffers:
 
-* **Capacity Tracking (Counting Semaphores):**
+* **Capacity Tracking:**
   * `sem_t empty`: Initialized to buffer capacity $K$, tracking available free slots. Producers block on `sem_wait(&empty)` when the buffer is full, preventing buffer overflow.
   * `sem_t full`: Initialized to $0$, tracking available ready items. Consumers block on `sem_wait(&full)` when the buffer is empty, preventing buffer underflow.
 
-* **Mutual Exclusion (Mutex):**
+* **Mutual Exclusion:**
   * `pthread_mutex_t lock`: Guards circular buffer pointer updates (`head`, `tail`, `count`) during enqueue and dequeue operations, ensuring internal ring-buffer integrity under concurrent access.
-
-* **Graceful Termination & Drain:**
-  * When all producers finish, a `shutdown` signal cascades through `full` semaphore wakeups, allowing consumers to completely drain all remaining buffered items before exiting cleanly without deadlocks.
