@@ -84,7 +84,7 @@ The implemented solution is based on an **autonomous process-based architecture*
 
 * **Concurrency Model (Processes via `fork()`):**
   * Philosophers are completely isolated child processes created via `fork()`.
-  * **Zero Shared Memory:** There are no shared heap pointers or memory segments. Each process maintains its own address space.
+  * Zero Shared Memory: There are no shared heap pointers or memory segments. Each process maintains its own address space.
   * Inter-Process Communication (IPC) is strictly message-passing over UNIX Domain sockets.
 
 * **Deadlock Prevention (Coordinator Allocation):**
