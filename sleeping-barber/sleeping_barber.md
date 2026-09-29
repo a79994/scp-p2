@@ -72,7 +72,7 @@ The Sleeping-Barber problem models a multi-server queueing system with bounded w
 3. **Brinch Hansen & Hoare's Monitor Sleeping Barber Algorithm**
    * *Proposed by:* Per Brinch Hansen (1973) and C. A. R. (Tony) Hoare (1974)
    * *Bibliographic Reference:*
-     * Brinch Hansen, P. (1973). *Operating System Principles*. Prentice Hall. Chapter 3: "Concurrent Processes".
+     * Brinch Hansen, P. (1973). *Operating System Principles*. Prentice Hall. Chapter 3: "Concurrent Processes". [https://dl.acm.org/doi/book/10.5555/540365](https://dl.acm.org/doi/book/10.5555/540365)
      * Hoare, C. A. R. (1974). *Monitors: An Operating System Structuring Concept*. Communications of the ACM, 17(10), 549–557. [https://doi.org/10.1145/355620.361161](https://doi.org/10.1145/355620.361161)
    * *Mechanism:* Encapsulates the entire shop state inside a monitor object using mutex locks and condition variables (`cond_barber_sleep`, `cond_customer_wait`, `cond_haircut_done[K]`). State variables explicitly record which chairs are occupied and which barbers are free.
    * *Outcome:* Avoids low-level semaphore signaling errors and simplifies implementing fair FIFO dispatching policies.
@@ -87,10 +87,10 @@ The Sleeping-Barber problem models a multi-server queueing system with bounded w
   * Downey, A. B. (2008). *The Little Book of Semaphores* (2nd ed.). Green Tea Press. Section 5.5: "The Barbershop Problem" and "The Multi-Barber Problem". [https://greenteapress.com/semaphores/](https://greenteapress.com/semaphores/)
   * Reek, K. A. (2004). *Design Patterns for Semaphores*. Proceedings of the 35th SIGCSE Technical Symposium on Computer Science Education, 36(1), 288–292. [https://doi.org/10.1145/971300.971399](https://doi.org/10.1145/971300.971399)
 * **Monitor Abstraction & Structured Synchronization:**
-  * Brinch Hansen, P. (1973). *Operating System Principles*. Prentice Hall. Chapter 3: "Concurrent Processes".
+  * Brinch Hansen, P. (1973). *Operating System Principles*. Prentice Hall. Chapter 3: "Concurrent Processes". [https://dl.acm.org/doi/book/10.5555/540365](https://dl.acm.org/doi/book/10.5555/540365)
   * Hoare, C. A. R. (1974). *Monitors: An Operating System Structuring Concept*. Communications of the ACM, 17(10), 549–557. [https://doi.org/10.1145/355620.361161](https://doi.org/10.1145/355620.361161)
 * **Queueing and Operating System Synchronization:**
-  * Stallings, W. (2008). *Operating Systems: Internals and Design Principles* (6th ed.). Prentice Hall. Chapter 5: Concurrency: Mutual Exclusion and Synchronization.
+  * Stallings, W. (2008). *Operating Systems: Internals and Design Principles* (6th ed.). Prentice Hall. Chapter 5: Concurrency: Mutual Exclusion and Synchronization. [https://williamstallings.com/OperatingSystems/](https://williamstallings.com/OperatingSystems/)
 * **Workload Distribution & Overdecomposition:**
   * Eijkhout, V. (2022). *The Art of HPC, Book 2: Parallel Programming for Science and Engineering*. [https://theartofhpc.com/pcse.html](https://theartofhpc.com/pcse.html)
 

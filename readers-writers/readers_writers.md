@@ -1,27 +1,29 @@
-# Readers-Writers Problem
+# Readers-Writers Problem (Distributed Message Broker Architecture)
 
-## 1. Problem Description and Concurrency Dilemma
-The Readers-Writers problem formalizes concurrent access to a shared resource (such as a database, memory map, or filesystem) where some entities only inspect the data while others modify it.
+## 1. Problem Description and Distributed Concurrency Dilemma
+The Readers-Writers problem formalizes concurrent access to a shared resource (such as a database, distributed cache, or data repository) where some entities only inspect the data while others mutate it.
 
 * **The Scenario:** A shared data repository is accessed by two distinct classes of concurrent entities: **Readers** and **Writers**.
+* **Zero Shared Memory Constraint (Distributed Nodes):** The entities operate as completely isolated POSIX processes (as if located on physically distinct computers across a local area network or WAN). No shared memory segments (`shmget`, `mmap(MAP_SHARED)`, `shm_open`), kernel semaphores, or shared mutexes are permitted.
 * **The Concurrency Dilemma:**
-  * **Read-Read Concurrency:** Reading does not alter the underlying data structure (it is idempotent and side-effect free). Multiple readers should be allowed to access the data concurrently without contention.
-  * **Write-Exclusive Access:** Modifying data is state-altering and destructive. A writer requires **strict mutual exclusion**: no other writer may write concurrently, and no reader may read concurrently while an update is in progress (preventing dirty reads and race conditions).
-  * **Arbitration Policy Dilemma:** Determining priority between readers and writers inevitably introduces performance tradeoffs and the danger of thread starvation.
+  * **Read-Read Concurrency:** Reading does not alter the underlying data structure (it is idempotent and side-effect free). Multiple readers must be allowed to query the data concurrently over the network without mutual contention.
+  * **Write-Exclusive Access:** Modifying data is state-altering. A writer requires **strict mutual exclusion**: no other writer may write concurrently, and no reader may read concurrently while an update is in progress (preventing dirty reads, torn reads, and race conditions).
+  * **Starvation-Freedom Dilemma:** In high-throughput distributed systems, an uninterrupted stream of reader queries can permanently starve writers, while an aggressive write stream can starve readers.
 
 ---
 
 ## 2. Fundamental Criteria
 
 ### 2.1 Active Entities
-* **Readers:** Concurrent processes/threads that query the shared dataset without modifying its internal representation.
-* **Writers:** Concurrent processes/threads that mutate, overwrite, or delete elements of the shared dataset.
+* **Message Broker:** Centralized message-oriented middleware and state custodian listening on a TCP/IP port (`AF_INET`). It manages the shared resource payload, enforces concurrency arbitration, and maintains real-time invariant telemetry.
+* **Reader Processes:** Concurrent client processes that issue read requests (`MSG_FETCH`) to obtain data snapshots.
+* **Writer Processes:** Concurrent client processes that publish mutation messages (`MSG_PUBLISH`) with new data payloads to the Broker's ingestion pipeline.
 
 ### 2.2 Scarce Resources
-* **Exclusive Access Window:** The exclusive lock/token to the underlying shared data structure during a mutation phase. When claimed, it completely excludes all other active entities across the system.
+* **Exclusive Mutation Window on the Broker:** The exclusive access window during which the Broker serializes and commits an incoming write payload into the data store, excluding all concurrent queries.
 
 ### 2.3 Real-World Example
-* **In-Memory Cache Invalidation in Distributed Systems (e.g., Redis):** In web-scale applications, millions of incoming user requests simultaneously inspect cached product metadata, authorization session tokens, or stock inventories without altering memory state (concurrent Readers). When an administrator updates a product price or an inventory level is decremented after checkout (Writer), the write operation must obtain exclusive access to the cache slot to invalidate or overwrite the key. Any concurrent reads during this window risk serving stale or half-written cache lines, requiring read-write locks (`pthread_rwlock`) or atomic compare-and-swap primitives to preserve consistency across worker threads.
+* **Distributed Key-Value Stores and Cache Brokers (e.g., Redis, Kafka, Distributed Caches):** In distributed microservices architectures, hundreds of services query shared catalog or user state across TCP sockets without holding local locks. When an inventory level or pricing configuration is updated, the write mutation is sent to the Message Broker, which atomically commits the new state and ensures no reader observes a partially updated record.
 
 ---
 
@@ -30,65 +32,79 @@ The Readers-Writers problem formalizes concurrent access to a shared resource (s
 1. **Courtois-Heymans-Parnas First Readers-Writers Algorithm (Reader-Preference)**
    * *Proposed by:* Pierre-Jacques Courtois, Frans Heymans, and David L. Parnas (1971)
    * *Bibliographic Reference:* Courtois, P. J., Heymans, F., & Parnas, D. L. (1971). *Concurrent Control with "Readers" and "Writers"*. Communications of the ACM, 14(10), 667–668. [https://doi.org/10.1145/362759.362813](https://doi.org/10.1145/362759.362813)
-   * *Mechanism:* Employs two binary semaphores (`mutex` and `wsem`, both initialized to 1) and an integer counter `readcount`. The first reader to arrive (`readcount == 1`) executes `P(wsem)`, locking the resource against writers. Subsequent readers increment `readcount` and proceed without touching `wsem`. The last reader to exit (`readcount == 0`) executes `V(wsem)`, releasing the resource.
-   * *Tradeoff:* Delivers maximum read concurrency and throughput, but causes **severe writer starvation** if a continuous stream of overlapping readers arrives.
+   * *Mechanism:* Prioritizes incoming readers; subsequent readers bypass waiting writers.
+   * *Tradeoff:* Maximizes read throughput, but causes **severe writer starvation**.
 
 2. **Courtois-Heymans-Parnas Second Readers-Writers Algorithm (Writer-Preference)**
    * *Proposed by:* Pierre-Jacques Courtois, Frans Heymans, and David L. Parnas (1971)
    * *Bibliographic Reference:* Courtois, P. J., Heymans, F., & Parnas, D. L. (1971). *Concurrent Control with "Readers" and "Writers"*. Communications of the ACM, 14(10), 667–668. [https://doi.org/10.1145/362759.362813](https://doi.org/10.1145/362759.362813)
-   * *Mechanism:* Introduces a `writecount` tracker alongside `readcount`, coordinated via five semaphores (`mutex1`, `mutex2`, `mutex3`, `wsem`, and `rsem`). As soon as the first writer signals its intention (`writecount == 1`), incoming readers are blocked at `rsem`. Existing active readers finish, the waiting writer executes, and readers only resume when all waiting writers have finished.
-   * *Tradeoff:* Guarantees prompt data updates and prevents writer starvation, but can cause **reader starvation** in write-heavy environments.
+   * *Mechanism:* Blocks incoming readers as soon as a writer signals intention to write.
+   * *Tradeoff:* Eliminates writer starvation, but causes **reader starvation** under continuous write workloads.
 
-3. **Starvation-Free Readers-Writers Algorithm (Third Problem / Turnstile Pattern)**
+3. **Starvation-Free Fair (Turnstile) Readers-Writers Algorithm**
    * *Proposed by:* Kenneth A. Reek (2004), Allen B. Downey (2005/2008), and Jalal Kawash (2004)
    * *Bibliographic Reference:*
      * Reek, K. A. (2004). *Design Patterns for Semaphores*. Proceedings of the 35th SIGCSE Technical Symposium on Computer Science Education, 36(1), 288–292. [https://doi.org/10.1145/971300.971399](https://doi.org/10.1145/971300.971399)
      * Downey, A. B. (2008). *The Little Book of Semaphores* (2nd ed.). Green Tea Press. Section 4.2.5: "No-starve readers-writers". [https://greenteapress.com/semaphores/](https://greenteapress.com/semaphores/)
-     * Kawash, J. (2004). *Process Synchronization with Readers and Writers Revisited*. Proceedings of the International Conference on Parallel and Distributed Processing Techniques and Applications (PDPTA'04), Las Vegas, Nevada.
-   * *Mechanism:* Introduces a "turnstile" binary semaphore (initialized to 1) at the entry point. Every incoming entity (reader or writer) must pass through the turnstile. If a writer is waiting, it holds the turnstile, preventing newly arriving readers from jumping ahead of the waiting writer.
-   * *Tradeoff:* Completely **starvation-free** for both readers and writers, offering predictable service latency with a minor reduction in peak read concurrency.
+     * Kawash, J. (2004). *Process Synchronization with Readers and Writers Revisited*. Proceedings of the PDPTA'04 Conference, Las Vegas, Nevada. [https://doi.org/10.2498/cit.2005.01.05](https://doi.org/10.2498/cit.2005.01.05)
+   * *Mechanism:* Implements a fair entrance turnstile through which all incoming entities must pass. A waiting writer holds the turnstile, preventing newly arriving readers from overtaking it.
+   * *Tradeoff:* Completely **starvation-free** for both readers and writers.
 
-4. **POSIX Read-Write Locks Standard (`pthread_rwlock`)**
-   * *Proposed by:* IEEE Portable Applications Standards Committee & The Open Group (POSIX.1c-1995 / IEEE Std 1003.1-2001)
+4. **Message-Oriented Middleware and Distributed Coordination**
+   * *Proposed by:* Birman & Joseph (1987); Coulouris et al. (2011)
    * *Bibliographic Reference:*
-     * IEEE Computer Society. (1995). *IEEE Std 1003.1c-1995: Information Technology - Portable Operating System Interface (POSIX) - Part 1: System Application Program Interface (API) - Amendment 2: Threads Extension (C Language)*. IEEE. [https://standards.ieee.org/ieee/1003.1c/1760/](https://standards.ieee.org/ieee/1003.1c/1760/)
-     * IEEE & The Open Group. (2001). *The Open Group Base Specifications Issue 6 / IEEE Std 1003.1-2001 (POSIX.1)*. Section: Read-Write Locks (`pthread_rwlock_init`, `pthread_rwlock_rdlock`, `pthread_rwlock_wrlock`). [https://pubs.opengroup.org/onlinepubs/009695399/functions/pthread_rwlock_init.html](https://pubs.opengroup.org/onlinepubs/009695399/functions/pthread_rwlock_init.html)
-   * *Mechanism:* Modern OS kernels provide native synchronization types (e.g., POSIX `pthread_rwlock_t`) configured with scheduling policies such as `PTHREAD_RWLOCK_PREFER_READER_NP` or `PTHREAD_RWLOCK_PREFER_WRITER_NONRECURSIVE_NP`, allowing kernel schedulers to select optimal fairness versus throughput trade-offs.
+     * Coulouris, G., Dollimore, J., Kindberg, T., & Blair, G. (2011). *Distributed Systems: Concepts and Design* (5th ed.). Addison-Wesley. Chapter 6: Indirect Communication (Message Queuing and Publish-Subscribe). [http://www.cdk5.net/](http://www.cdk5.net/)
+     * Birman, K. P., & Joseph, T. A. (1987). *Reliable communication in the presence of failures*. ACM Transactions on Computer Systems (TOCS), 5(1), 47–76. [https://doi.org/10.1145/7351.7478](https://doi.org/10.1145/7351.7478)
+   * *Mechanism:* Eliminates reliance on shared physical memory by routing structured data packets over stream-oriented transport protocols (TCP/IP).
 
 ---
 
-## 4. References and Original Problem
+## 4. References and Bibliographic Citations
 
 * **Original Problem Formulation (First & Second Variations):**
+  * Dijkstra, E. W. (1965). *Cooperating Sequential Processes* (EWD123). Technological University, Eindhoven. [http://www.cs.utexas.edu/users/EWD/transcriptions/EWD01xx/EWD123.html](http://www.cs.utexas.edu/users/EWD/transcriptions/EWD01xx/EWD123.html)
   * Courtois, P. J., Heymans, F., & Parnas, D. L. (1971). *Concurrent Control with "Readers" and "Writers"*. Communications of the ACM, 14(10), 667–668. [https://doi.org/10.1145/362759.362813](https://doi.org/10.1145/362759.362813)
-* **Fair / Starvation-Free Synchronization Patterns:**
-  * Reek, K. A. (2004). *Design Patterns for Semaphores*. Proceedings of the 35th SIGCSE Technical Symposium on Computer Science Education, 36(1), 288–292. [https://doi.org/10.1145/971300.971399](https://doi.org/10.1145/971300.971399)
+* **Starvation-Free Synchronization Patterns & The Turnstile Paradigm:**
   * Downey, A. B. (2008). *The Little Book of Semaphores* (2nd ed.). Green Tea Press. Section 4.2: Readers-Writers Problem and "No-starve readers-writers". [https://greenteapress.com/semaphores/](https://greenteapress.com/semaphores/)
-  * Kawash, J. (2004). *Process Synchronization with Readers and Writers Revisited*. Proceedings of the International Conference on Parallel and Distributed Processing Techniques and Applications (PDPTA'04), Las Vegas, Nevada.
-* **POSIX Synchronization Standards:**
-  * IEEE & The Open Group. (2001). *The Open Group Base Specifications Issue 6 / IEEE Std 1003.1-2001 (POSIX.1)*. [https://pubs.opengroup.org/onlinepubs/009695399/](https://pubs.opengroup.org/onlinepubs/009695399/)
-* **Queueing and Operating System Synchronization:**
-  * Stallings, W. (2008). *Operating Systems: Internals and Design Principles* (6th ed.). Prentice Hall. Chapter 5: Concurrency: Mutual Exclusion and Synchronization.
+* **Message-Oriented Middleware & Distributed Communication:**
+  * Tanenbaum, A. S., & Van Steen, M. (2017). *Distributed Systems: Principles and Paradigms* (3rd ed.). CreateSpace Independent Publishing Platform. Chapter 4: Communication. [https://www.distributed-systems.net/index.php/books/ds3/](https://www.distributed-systems.net/index.php/books/ds3/)
+* **Operating System Concurrency & Synchronization:**
+  * Silberschatz, A., Galvin, P. B., & Gagne, G. (2018). *Operating System Concepts* (10th ed.). Wiley. Chapters 6 & 7: Synchronization Tools and Examples. [https://os-book.com/](https://os-book.com/)
 
 ---
 
-## 5. Implemented Solution
+## 5. Implemented Solution: Distributed Message Broker
 
-The implemented solution is based on the **Starvation-Free Fair (Turnstile) Readers-Writers Algorithm (WKS 3)**:
+The implemented architecture is based on **Process Isolation over TCP/IP** coupled with **Downey's Starvation-Free Fair Turnstile Algorithm** hosted within the Message Broker.
 
-* **Fair Ordering & Starvation Prevention (`turnstile`):**
-  * `sem_t turnstile`: Initialized to 1. All incoming readers and writers must pass through the turnstile.
-  * When a writer arrives, it holds `turnstile` while awaiting current readers to drain. Any subsequent readers that arrive block at the turnstile, preventing newly arriving readers from indefinitely bypassing the waiting writer and eliminating writer starvation.
+### 5.1 Zero Shared Memory Protocol
+All interactions take place through structured fixed-size network frames over TCP stream sockets:
 
-* **Mutual Exclusion & Room Protection (`room_empty`):**
-  * `sem_t room_empty`: Initialized to 1. Ensures that writers have exclusive access to the shared resource.
-  * The first reader to enter (`readers_count == 1`) locks `room_empty`, barring writers from entering while readers are inspecting data.
-  * The last reader to exit (`readers_count == 0`) unlocks `room_empty`, allowing a waiting writer to proceed.
+| Message Type | Direction | Payload Contents | Description |
+| :--- | :--- | :--- | :--- |
+| `MSG_REGISTER` | Client $\rightarrow$ Broker | Role (`READER`, `WRITER`, `ADMIN`), Client ID | Handshake upon connection. |
+| `MSG_FETCH` | Reader $\rightarrow$ Broker | Client ID | Query request for the current resource snapshot. |
+| `MSG_FETCH_RESP` | Broker $\rightarrow$ Reader | Data Array (`values[8]`), Version, Timestamp | Snapshot returned during concurrent read lease. |
+| `MSG_PUBLISH` | Writer $\rightarrow$ Broker | Data Array (`values[8]`), Client ID | Write mutation submitted to Broker ingestion pipeline. |
+| `MSG_WRITE_ACK` | Broker $\rightarrow$ Writer | Committed Version Number, Status | Confirmation that write was atomically committed. |
+| `MSG_STATS_REQ` | Admin $\rightarrow$ Broker | - | Query real-time invariant telemetry and counters. |
+| `MSG_SHUTDOWN` | Admin $\rightarrow$ Broker | - | Instructs the Broker to stop accepting queries. |
 
-* **Reader Counter Protection (`read_mutex`):**
-  * `pthread_mutex_t read_mutex`: Guards increments and decrements of `readers_count` against concurrent modifications.
+### 5.2 Starvation-Free Fairness on the Broker
+1. **Entrance Turnstile (`turnstile`):** Every worker thread handling a client connection must pass through the turnstile mutex.
+2. **Concurrent Reads (`readers_count` & `room_empty_cv`):**
+   * Readers pass through the turnstile and increment `readers_count`.
+   * The first reader locks `room_mutex`. Subsequent readers read concurrently without blocking each other.
+   * Readers release `turnstile` immediately upon entry, allowing other readers to join concurrently.
+3. **Starvation Prevention for Writers:**
+   * When a writer arrives, it claims `turnstile` and awaits all existing readers in the room to exit.
+   * Because the writer holds `turnstile`, **no newly arriving readers can pass**. They queue up behind the writer.
+   * When the last existing reader exits, the writer enters the room, mutates the array payload, commits the new version, signals `room_empty_cv`, and unlocks `turnstile`.
+4. **Starvation Prevention for Readers:**
+   * Once the writer unlocks `turnstile`, waiting readers are admitted in FIFO order.
 
-* **Invariant Guarantees:**
-  * **Writer Mutual Exclusion:** At most one writer may modify the shared resource at any given time.
-  * **No Dirty Reads:** Readers never inspect data during a writer's critical section.
-  * **Concurrent Reading:** When no writer is present, multiple readers can concurrently access the resource.
+### 5.3 Invariant Verification
+The Broker continuously monitors and asserts three critical invariants on every state transition:
+* **Writer Mutual Exclusion:** `active_writers <= 1`.
+* **Reader-Writer Exclusion:** `!(active_writers > 0 && active_readers > 0)`.
+* **Write Atomicity & Data Consistency:** Payload elements are validated on every read to prove that no torn reads occur during writes.

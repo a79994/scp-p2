@@ -10,8 +10,8 @@ TEST_CASES_DIR = test/cases
 BUILD_DIR = build
 
 # Core object files
-CORE_SRCS = $(SRC_DIR)/rwlock.c
-CORE_OBJS = $(BUILD_DIR)/rwlock.o
+CORE_SRCS = $(SRC_DIR)/protocol.c $(SRC_DIR)/broker.c $(SRC_DIR)/client.c
+CORE_OBJS = $(BUILD_DIR)/protocol.o $(BUILD_DIR)/broker.o $(BUILD_DIR)/client.o
 
 # Main binary
 MAIN_BIN = readers_writers
@@ -33,10 +33,16 @@ dirs:
 	@mkdir -p $(TEST_CASES_DIR)
 
 # Compilation of core objects
-$(BUILD_DIR)/rwlock.o: $(SRC_DIR)/rwlock.c $(INC_DIR)/rwlock.h
+$(BUILD_DIR)/protocol.o: $(SRC_DIR)/protocol.c $(INC_DIR)/protocol.h
 	$(CC) $(CFLAGS) -c $< -o $@
 
-$(BUILD_DIR)/main.o: $(MAIN_SRC) $(INC_DIR)/rwlock.h
+$(BUILD_DIR)/broker.o: $(SRC_DIR)/broker.c $(INC_DIR)/broker.h $(INC_DIR)/protocol.h
+	$(CC) $(CFLAGS) -c $< -o $@
+
+$(BUILD_DIR)/client.o: $(SRC_DIR)/client.c $(INC_DIR)/client.h $(INC_DIR)/protocol.h
+	$(CC) $(CFLAGS) -c $< -o $@
+
+$(BUILD_DIR)/main.o: $(MAIN_SRC) $(INC_DIR)/broker.h $(INC_DIR)/client.h $(INC_DIR)/protocol.h
 	$(CC) $(CFLAGS) -c $< -o $@
 
 # Link main binary

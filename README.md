@@ -12,7 +12,7 @@ The project is structured into modular directories, one for each concurrency pro
 | :--- | :--- | :--- | :--- |
 | [`dining_philosophers/`](./dining_philosophers/) | Dining Philosophers | **Processes (`fork`)** | UNIX Domain Sockets (`AF_UNIX`) + Fair FIFO Coordinator |
 | [`producer-consumer/`](./producer-consumer/) | Producer-Consumer | **Processes (`fork`)** | Dual UNIX Pipes IPC + Credit-Token Flow Control (Zero Shared Memory) |
-| [`readers_writers/`](./readers_writers/) | Readers-Writers | Threads (`pthread`) | Starvation-Free Fair Turnstile Algorithm (Semaphores / Mutexes) |
+| [`readers-writers/`](./readers-writers/) | Readers-Writers | **Processes (`fork` / Distributed)** | TCP Message Broker (`AF_INET`) + Ingestion Queue & Fair Turnstile (Zero Shared Memory) |
 | [`sleeping-barber/`](./sleeping-barber/) | Sleeping Barber | Threads (`pthread`) | Downey Multi-Barber Private Semaphore Algorithm |
 
 ---

@@ -1,107 +1,124 @@
 #include "test_runner.h"
 #include <stdio.h>
 #include <stdlib.h>
-#include <pthread.h>
+#include <unistd.h>
+#include <sys/wait.h>
 
 #define NUM_READERS 4
 #define NUM_WRITERS 2
-#define OPS_PER_THREAD 25
+#define OPS_PER_PROCESS 25
 
-typedef struct {
-    int id;
-    rwlock_t *rw;
-    shared_resource_t *res;
-    int ops_done;
-} worker_arg_t;
-
-static void *reader_thread(void *arg) {
-    worker_arg_t *w = (worker_arg_t *)arg;
-    for (int i = 0; i < OPS_PER_THREAD; i++) {
-        usleep(500);
-        int version = 0;
-        shared_resource_read(w->res, w->rw, &version);
-        w->ops_done++;
+static void reader_proc(int id, int port) {
+    client_conn_t conn;
+    if (client_connect(&conn, "127.0.0.1", port, ROLE_READER, id) != 0) {
+        exit(1);
     }
-    return NULL;
+    for (int i = 0; i < OPS_PER_PROCESS; i++) {
+        usleep(300);
+        resource_snapshot_t snap;
+        if (!client_fetch(&conn, &snap)) {
+            exit(1);
+        }
+    }
+    client_disconnect(&conn);
+    exit(0);
 }
 
-static void *writer_thread(void *arg) {
-    worker_arg_t *w = (worker_arg_t *)arg;
-    for (int i = 0; i < OPS_PER_THREAD; i++) {
-        usleep(1000);
-        shared_resource_write(w->res, w->rw, (w->id + 1) * 100 + i);
-        w->ops_done++;
+static void writer_proc(int id, int port) {
+    client_conn_t conn;
+    if (client_connect(&conn, "127.0.0.1", port, ROLE_WRITER, id) != 0) {
+        exit(1);
     }
-    return NULL;
+    for (int i = 0; i < OPS_PER_PROCESS; i++) {
+        usleep(500);
+        int32_t values[DATA_PAYLOAD_SIZE];
+        for (int k = 0; k < DATA_PAYLOAD_SIZE; k++) {
+            values[k] = (id + 1) * 100 + i;
+        }
+        int32_t ver = 0;
+        if (!client_publish(&conn, values, &ver)) {
+            exit(1);
+        }
+    }
+    client_disconnect(&conn);
+    exit(0);
 }
 
 int main(void) {
-    printf(COLOR_CYAN "=== [TEST CASE 1] Basic Readers-Writers Lifecycle ===" COLOR_RESET "\n");
-    init_test_watchdog(10);
+    printf(COLOR_CYAN "=== [TEST CASE 1] Basic Readers-Writers Lifecycle (Message Broker) ===" COLOR_RESET "\n");
+    init_test_watchdog(12);
 
-    rwlock_t rw;
-    if (rwlock_init(&rw) != 0) {
-        fprintf(stderr, COLOR_RED "[FAIL] Failed to initialize rwlock!\n" COLOR_RESET);
+    broker_server_t broker;
+    if (broker_init(&broker, 0, false) != 0) {
+        fprintf(stderr, COLOR_RED "[FAIL] Failed to initialize broker!\n" COLOR_RESET);
+        return 1;
+    }
+    int port = broker_get_port(&broker);
+
+    if (broker_start(&broker) != 0) {
+        fprintf(stderr, COLOR_RED "[FAIL] Failed to start broker!\n" COLOR_RESET);
         return 1;
     }
 
-    shared_resource_t res;
-    shared_resource_init(&res, 0);
-
-    pthread_t readers[NUM_READERS];
-    worker_arg_t rargs[NUM_READERS];
-    pthread_t writers[NUM_WRITERS];
-    worker_arg_t wargs[NUM_WRITERS];
+    pid_t readers[NUM_READERS];
+    pid_t writers[NUM_WRITERS];
 
     for (int i = 0; i < NUM_READERS; i++) {
-        rargs[i].id = i;
-        rargs[i].rw = &rw;
-        rargs[i].res = &res;
-        rargs[i].ops_done = 0;
-        pthread_create(&readers[i], NULL, reader_thread, &rargs[i]);
+        readers[i] = fork();
+        if (readers[i] == 0) {
+            reader_proc(i, port);
+        }
     }
 
     for (int i = 0; i < NUM_WRITERS; i++) {
-        wargs[i].id = i;
-        wargs[i].rw = &rw;
-        wargs[i].res = &res;
-        wargs[i].ops_done = 0;
-        pthread_create(&writers[i], NULL, writer_thread, &wargs[i]);
+        writers[i] = fork();
+        if (writers[i] == 0) {
+            writer_proc(i, port);
+        }
     }
 
     for (int i = 0; i < NUM_READERS; i++) {
-        pthread_join(readers[i], NULL);
+        int status;
+        waitpid(readers[i], &status, 0);
     }
     for (int i = 0; i < NUM_WRITERS; i++) {
-        pthread_join(writers[i], NULL);
+        int status;
+        waitpid(writers[i], &status, 0);
     }
 
     cancel_test_watchdog();
 
-    int expected_reads = NUM_READERS * OPS_PER_THREAD;
-    int expected_writes = NUM_WRITERS * OPS_PER_THREAD;
+    int expected_reads = NUM_READERS * OPS_PER_PROCESS;
+    int expected_writes = NUM_WRITERS * OPS_PER_PROCESS;
+
+    client_conn_t admin;
+    broker_telemetry_t stats;
+    if (client_connect(&admin, "127.0.0.1", port, ROLE_ADMIN, 999) == 0) {
+        client_query_stats(&admin, &stats);
+        client_disconnect(&admin);
+    } else {
+        fprintf(stderr, COLOR_RED "[FAIL] Could not query broker stats!\n" COLOR_RESET);
+        broker_stop(&broker);
+        return 1;
+    }
 
     printf(" Checking results:\n");
-    printf("  - Total reads completed: %d (expected: %d)\n", res.total_reads, expected_reads);
-    printf("  - Total writes completed: %d (expected: %d)\n", res.total_writes, expected_writes);
-    printf("  - Invariant violations: %d\n", res.invariant_violations);
+    printf("  - Total reads completed: %d (expected: %d)\n", stats.total_reads_completed, expected_reads);
+    printf("  - Total writes completed: %d (expected: %d)\n", stats.total_writes_completed, expected_writes);
+    printf("  - Peak concurrent readers: %d\n", stats.max_concurrent_readers);
+    printf("  - Invariant violations: %d\n", stats.invariant_violations);
 
-    if (res.total_reads != expected_reads || res.total_writes != expected_writes) {
+    broker_stop(&broker);
+
+    if (stats.total_reads_completed != expected_reads || stats.total_writes_completed != expected_writes) {
         fprintf(stderr, COLOR_RED "[FAIL] Operation count mismatch!\n" COLOR_RESET);
-        rwlock_destroy(&rw);
-        shared_resource_destroy(&res);
         return 1;
     }
 
-    if (!shared_resource_verify_invariants(&res)) {
-        fprintf(stderr, COLOR_RED "[FAIL] Invariant verification failed!\n" COLOR_RESET);
-        rwlock_destroy(&rw);
-        shared_resource_destroy(&res);
+    if (stats.invariant_violations != 0) {
+        fprintf(stderr, COLOR_RED "[FAIL] Invariant violations detected (%d)!\n" COLOR_RESET, stats.invariant_violations);
         return 1;
     }
-
-    rwlock_destroy(&rw);
-    shared_resource_destroy(&res);
 
     printf(COLOR_GREEN "[PASS] Case 1 passed: Basic lifecycle and operation counts verified.\n" COLOR_RESET);
     return 0;

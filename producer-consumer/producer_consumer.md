@@ -50,7 +50,7 @@ The Producer-Consumer problem models the temporal decoupling of tasks that produ
 2. **McIlroy & Thompson's UNIX Pipe Pipeline Architecture**
    * *Proposed by:* M. Douglas McIlroy (1964) & Ken Thompson / Dennis M. Ritchie (1973)
    * *Bibliographic Reference:* 
-     * McIlroy, M. D. (1964). *A memorandum on Unix pipes and pipeline communication*. Bell Telephone Laboratories.
+     * McIlroy, M. D. (1964). *A memorandum on Unix pipes and pipeline communication*. Bell Telephone Laboratories. [http://doc.cat-v.org/unix/pipes/](http://doc.cat-v.org/unix/pipes/)
      * Ritchie, D. M., & Thompson, K. (1974). *The UNIX Time-Sharing System*. Communications of the ACM, 17(7), 365–375. [https://doi.org/10.1145/361011.361061](https://doi.org/10.1145/361011.361061)
    * *Mechanism:* The kernel implements a circular memory buffer between processes with two file descriptors: read-end and write-end. Writing to a full pipe automatically blocks the calling process in the kernel scheduler; reading from an empty pipe automatically blocks until data is present. Closing all write descriptors triggers an automatic `EOF` (`read() == 0`) across all waiting readers.
    * *Outcome:* The canonical OS-level abstraction for process-based Producer-Consumer pipelines without shared memory.
@@ -82,17 +82,9 @@ The Producer-Consumer problem models the temporal decoupling of tasks that produ
 * **Dijkstra's Bounded Buffer & Counting Semaphores:**
   * Dijkstra, E. W. (1965). *Cooperating Sequential Processes* (EWD123). Technological University, Eindhoven. [http://www.cs.utexas.edu/users/EWD/transcriptions/EWD01xx/EWD123.html](http://www.cs.utexas.edu/users/EWD/transcriptions/EWD01xx/EWD123.html)
 * **UNIX Pipes and Operating System Pipelines:**
-  * McIlroy, M. D. (1964). *A memorandum on Unix pipes and pipeline communication*. Bell Telephone Laboratories.
-  * Ritchie, D. M., & Thompson, K. (1974). *The UNIX Time-Sharing System*. Communications of the ACM, 17(7), 365–375. [https://doi.org/10.1145/361011.361061](https://doi.org/10.1145/361011.361061)
-  * Stevens, W. R., & Rago, S. A. (2013). *Advanced Programming in the UNIX Environment* (3rd ed.). Addison-Wesley.
-  * Kerrisk, M. (2010). *The Linux Programming Interface*. No Starch Press.
-* **Monitor Abstraction & Condition Variables:**
-  * Hoare, C. A. R. (1974). *Monitors: An Operating System Structuring Concept*. Communications of the ACM, 17(10), 549–557. [https://doi.org/10.1145/355620.361161](https://doi.org/10.1145/355620.361161)
+  * McIlroy, M. D. (1964). *A memorandum on Unix pipes and pipeline communication*. Bell Telephone Laboratories. [http://doc.cat-v.org/unix/pipes/](http://doc.cat-v.org/unix/pipes/)
 * **Communicating Sequential Processes (CSP):**
   * Hoare, C. A. R. (1978). *Communicating Sequential Processes*. Communications of the ACM, 21(8), 666–677. [https://doi.org/10.1145/359576.359585](https://doi.org/10.1145/359576.359585)
-* **Lock-Free Non-Blocking SPSC Queues:**
-  * Lamport, L. (1977). *Proving the Correctness of Multiprocess Programs*. IEEE Transactions on Software Engineering, SE-3(2), 125–143. [https://doi.org/10.1109/TSE.1977.229904](https://doi.org/10.1109/TSE.1977.229904)
-  * Lamport, L. (1983). *Specifying Concurrent Program Modules*. ACM Transactions on Programming Languages and Systems (TOPLAS), 5(2), 190–222. [https://doi.org/10.1145/69624.357162](https://doi.org/10.1145/69624.357162)
 
 ---
 

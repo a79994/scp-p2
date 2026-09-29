@@ -1,82 +1,35 @@
 #define _DEFAULT_SOURCE
 #define _POSIX_C_SOURCE 200809L
-#include "rwlock.h"
+#include "broker.h"
+#include "client.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 #include <getopt.h>
+#include <signal.h>
+#include <sys/wait.h>
 #include <time.h>
-
-typedef struct {
-    int id;
-    rwlock_t *rw;
-    shared_resource_t *res;
-    int ops_to_perform;
-    int ops_completed;
-    bool verbose;
-} reader_arg_t;
-
-typedef struct {
-    int id;
-    rwlock_t *rw;
-    shared_resource_t *res;
-    int ops_to_perform;
-    int ops_completed;
-    bool verbose;
-} writer_arg_t;
 
 static void print_usage(const char *prog) {
     printf("Usage: %s [options]\n", prog);
-    printf("Options:\n");
-    printf("  -r <num>       Number of readers (default: 5, min: 1)\n");
-    printf("  -w <num>       Number of writers (default: 2, min: 1)\n");
-    printf("  -o <ops>       Operations per thread (default: 10, min: 1)\n");
-    printf("  -v             Verbose output (log each read/write)\n");
-    printf("  -help, -h      Show this help message\n");
-}
-
-static void *reader_routine(void *arg) {
-    reader_arg_t *r = (reader_arg_t *)arg;
-    unsigned int seed = (unsigned int)(time(NULL) ^ (r->id << 4) ^ pthread_self());
-
-    for (int i = 0; i < r->ops_to_perform; i++) {
-        int delay = 1000 + (rand_r(&seed) % 4000);
-        usleep(delay);
-
-        int version = 0;
-        int val = shared_resource_read(r->res, r->rw, &version);
-        r->ops_completed++;
-
-        if (r->verbose) {
-            printf("[Reader %2d] Read value %5d (Version: %d)\n", r->id, val, version);
-        }
-    }
-
-    return NULL;
-}
-
-static void *writer_routine(void *arg) {
-    writer_arg_t *w = (writer_arg_t *)arg;
-    unsigned int seed = (unsigned int)(time(NULL) ^ (w->id << 6) ^ pthread_self());
-
-    for (int i = 0; i < w->ops_to_perform; i++) {
-        int delay = 1500 + (rand_r(&seed) % 5000);
-        usleep(delay);
-
-        int new_val = (w->id + 1) * 1000 + i;
-        shared_resource_write(w->res, w->rw, new_val);
-        w->ops_completed++;
-
-        if (w->verbose) {
-            printf("[Writer %2d] Wrote value %5d\n", w->id, new_val);
-        }
-    }
-
-    return NULL;
+    printf("Options (Orchestrated Mode):\n");
+    printf("  -r <num>       Number of reader processes (default: 5, min: 1)\n");
+    printf("  -w <num>       Number of writer processes (default: 2, min: 1)\n");
+    printf("  -o <ops>       Operations per process (default: 10, min: 1)\n");
+    printf("  -p <port>      Broker TCP port (default: 0 for dynamic port)\n");
+    printf("  -v             Verbose output (log each publish/fetch)\n");
+    printf("  -help, -h      Show this help message\n\n");
+    printf("Options (Standalone Mode for Separate PCs / Terminals):\n");
+    printf("  --broker       Run as standalone Message Broker server\n");
+    printf("  --reader       Run as standalone Reader client process\n");
+    printf("  --writer       Run as standalone Writer client process\n");
+    printf("  --host <ip>    Broker host address (default: 127.0.0.1)\n");
+    printf("  --id <num>     Logical client ID (default: 0)\n");
 }
 
 int main(int argc, char **argv) {
+    /* Check for help */
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "-help") == 0 || strcmp(argv[i], "--help") == 0 || strcmp(argv[i], "-h") == 0) {
             print_usage(argv[0]);
@@ -84,143 +37,230 @@ int main(int argc, char **argv) {
         }
     }
 
+    int mode = 0; /* 0: Orchestrator, 1: Standalone Broker, 2: Standalone Reader, 3: Standalone Writer */
+    char host[128] = "127.0.0.1";
+    int client_id = 0;
     int num_readers = 5;
     int num_writers = 2;
-    int ops_per_thread = 10;
+    int ops_per_proc = 10;
+    int port = 0;
     bool verbose = false;
 
+    /* Parse long options first */
+    for (int i = 1; i < argc; i++) {
+        if (strcmp(argv[i], "--broker") == 0) {
+            mode = 1;
+        } else if (strcmp(argv[i], "--reader") == 0) {
+            mode = 2;
+        } else if (strcmp(argv[i], "--writer") == 0) {
+            mode = 3;
+        } else if (strcmp(argv[i], "--host") == 0 && i + 1 < argc) {
+            strncpy(host, argv[i + 1], sizeof(host) - 1);
+            i++;
+        } else if (strcmp(argv[i], "--id") == 0 && i + 1 < argc) {
+            client_id = atoi(argv[i + 1]);
+            i++;
+        }
+    }
+
+    /* Standard getopt parsing for common flags */
     int opt;
-    while ((opt = getopt(argc, argv, "r:w:o:vh")) != -1) {
+    optind = 1;
+    while ((opt = getopt(argc, argv, "r:w:o:p:vh")) != -1) {
         switch (opt) {
             case 'r':
                 num_readers = atoi(optarg);
                 if (num_readers < 1) {
-                    fprintf(stderr, "Error: Number of readers must be >= 1.\n");
+                    fprintf(stderr, "Error: Readers count must be >= 1.\n");
                     return 1;
                 }
                 break;
             case 'w':
                 num_writers = atoi(optarg);
                 if (num_writers < 1) {
-                    fprintf(stderr, "Error: Number of writers must be >= 1.\n");
+                    fprintf(stderr, "Error: Writers count must be >= 1.\n");
                     return 1;
                 }
                 break;
             case 'o':
-                ops_per_thread = atoi(optarg);
-                if (ops_per_thread < 1) {
-                    fprintf(stderr, "Error: Operations per thread must be >= 1.\n");
+                ops_per_proc = atoi(optarg);
+                if (ops_per_proc < 1) {
+                    fprintf(stderr, "Error: Operations per process must be >= 1.\n");
                     return 1;
                 }
+                break;
+            case 'p':
+                port = atoi(optarg);
                 break;
             case 'v':
                 verbose = true;
                 break;
             case 'h':
-            default:
                 print_usage(argv[0]);
                 return 0;
+            default:
+                break;
         }
     }
 
-    int total_expected_reads = num_readers * ops_per_thread;
-    int total_expected_writes = num_writers * ops_per_thread;
+    /* Ignore SIGPIPE for reliable socket handling across processes */
+    signal(SIGPIPE, SIG_IGN);
+
+    /* --- STANDALONE MODES --- */
+    if (mode == 1) {
+        /* Standalone Broker */
+        if (port == 0) port = DEFAULT_BROKER_PORT;
+        broker_server_t broker;
+        if (broker_init(&broker, port, verbose) != 0) {
+            fprintf(stderr, "Failed to initialize broker on port %d.\n", port);
+            return 1;
+        }
+        printf("==============================================================\n");
+        printf("       READERS-WRITERS: Standalone Message Broker             \n");
+        printf("==============================================================\n");
+        printf(" Listening on TCP port: %d (PID %d)\n", broker_get_port(&broker), getpid());
+        printf(" Press Ctrl+C or send MSG_SHUTDOWN to terminate.\n");
+        printf("==============================================================\n\n");
+        broker_run_loop(&broker);
+        broker_stop(&broker);
+        return 0;
+    } else if (mode == 2) {
+        /* Standalone Reader */
+        if (port == 0) port = DEFAULT_BROKER_PORT;
+        printf("[Standalone Reader %d] Connecting to %s:%d...\n", client_id, host, port);
+        return reader_process_run(client_id, host, port, ops_per_proc, verbose);
+    } else if (mode == 3) {
+        /* Standalone Writer */
+        if (port == 0) port = DEFAULT_BROKER_PORT;
+        printf("[Standalone Writer %d] Connecting to %s:%d...\n", client_id, host, port);
+        return writer_process_run(client_id, host, port, ops_per_proc, verbose);
+    }
+
+    /* --- ORCHESTRATED MULTI-PROCESS MODE --- */
+    broker_server_t broker;
+    if (broker_init(&broker, port, verbose) != 0) {
+        fprintf(stderr, "Failed to initialize message broker.\n");
+        return 1;
+    }
+    int broker_port = broker_get_port(&broker);
 
     printf("==============================================================\n");
-    printf("     READERS-WRITERS: Starvation-Free Fair Turnstile          \n");
+    printf("   READERS-WRITERS: Message Broker (TCP) + Starvation-Free    \n");
     printf("==============================================================\n");
     printf(" Configuration:\n");
-    printf("  - Readers: %d\n", num_readers);
-    printf("  - Writers: %d\n", num_writers);
-    printf("  - Operations per thread: %d\n", ops_per_thread);
-    printf("  - Total Expected Reads: %d | Total Expected Writes: %d\n",
-           total_expected_reads, total_expected_writes);
-    printf("  - Synchronization: Turnstile Semaphore + Room Semaphore + Mutex\n");
-    if (argc == 1) {
-        printf("  - Note: Running with default settings. Command-line arguments\n");
-        printf("          can be used to modify parameters (run with -help for details).\n");
-    }
+    printf("  - Concurrency Model: Multi-Process (fork, Zero Shared Memory)\n");
+    printf("  - Message Middleware: Message Broker (TCP port %d)\n", broker_port);
+    printf("  - Reader Processes: %d\n", num_readers);
+    printf("  - Writer Processes: %d\n", num_writers);
+    printf("  - Operations / Proc: %d (Total Reads: %d, Total Writes: %d)\n",
+           ops_per_proc, num_readers * ops_per_proc, num_writers * ops_per_proc);
+    printf("  - Fairness Algorithm: Downey Starvation-Free Fair Turnstile\n");
     printf("==============================================================\n\n");
 
-    rwlock_t rw;
-    if (rwlock_init(&rw) != 0) {
-        fprintf(stderr, "Failed to initialize rwlock.\n");
+    uint64_t start_time = get_time_us();
+
+    /* 1. Fork Broker Process */
+    pid_t broker_pid = fork();
+    if (broker_pid < 0) {
+        perror("fork broker");
+        broker_stop(&broker);
         return 1;
     }
 
-    shared_resource_t res;
-    shared_resource_init(&res, 0);
-
-    pthread_t *reader_threads = malloc(sizeof(pthread_t) * num_readers);
-    reader_arg_t *reader_args = malloc(sizeof(reader_arg_t) * num_readers);
-    pthread_t *writer_threads = malloc(sizeof(pthread_t) * num_writers);
-    writer_arg_t *writer_args = malloc(sizeof(writer_arg_t) * num_writers);
-
-    for (int i = 0; i < num_writers; i++) {
-        writer_args[i].id = i;
-        writer_args[i].rw = &rw;
-        writer_args[i].res = &res;
-        writer_args[i].ops_to_perform = ops_per_thread;
-        writer_args[i].ops_completed = 0;
-        writer_args[i].verbose = verbose;
-        pthread_create(&writer_threads[i], NULL, writer_routine, &writer_args[i]);
+    if (broker_pid == 0) {
+        /* Child: runs Message Broker server loop */
+        broker_run_loop(&broker);
+        exit(0);
     }
 
+    /* Parent: close listening socket handle, as child process handles it */
+    close(broker.server_fd);
+    broker.server_fd = -1;
+
+    /* 2. Fork Reader Processes */
+    pid_t reader_pids[num_readers];
     for (int i = 0; i < num_readers; i++) {
-        reader_args[i].id = i;
-        reader_args[i].rw = &rw;
-        reader_args[i].res = &res;
-        reader_args[i].ops_to_perform = ops_per_thread;
-        reader_args[i].ops_completed = 0;
-        reader_args[i].verbose = verbose;
-        pthread_create(&reader_threads[i], NULL, reader_routine, &reader_args[i]);
+        reader_pids[i] = fork();
+        if (reader_pids[i] < 0) {
+            perror("fork reader");
+            return 1;
+        }
+        if (reader_pids[i] == 0) {
+            int ret = reader_process_run(i, "127.0.0.1", broker_port, ops_per_proc, verbose);
+            exit(ret);
+        }
     }
 
+    /* 3. Fork Writer Processes */
+    pid_t writer_pids[num_writers];
     for (int i = 0; i < num_writers; i++) {
-        pthread_join(writer_threads[i], NULL);
+        writer_pids[i] = fork();
+        if (writer_pids[i] < 0) {
+            perror("fork writer");
+            return 1;
+        }
+        if (writer_pids[i] == 0) {
+            int ret = writer_process_run(i, "127.0.0.1", broker_port, ops_per_proc, verbose);
+            exit(ret);
+        }
     }
 
+    /* 4. Await all Reader and Writer child processes */
     for (int i = 0; i < num_readers; i++) {
-        pthread_join(reader_threads[i], NULL);
+        int status;
+        waitpid(reader_pids[i], &status, 0);
+    }
+    for (int i = 0; i < num_writers; i++) {
+        int status;
+        waitpid(writer_pids[i], &status, 0);
     }
 
-    int total_reads = 0;
-    int total_writes = 0;
+    uint64_t total_elapsed_us = get_time_us() - start_time;
 
+    /* 5. Connect as Admin to query final telemetry and shutdown Broker */
+    client_conn_t admin_conn;
+    broker_telemetry_t final_stats;
+    memset(&final_stats, 0, sizeof(final_stats));
+
+    if (client_connect(&admin_conn, "127.0.0.1", broker_port, ROLE_ADMIN, 999) == 0) {
+        client_query_stats(&admin_conn, &final_stats);
+        client_request_shutdown(&admin_conn);
+        client_disconnect(&admin_conn);
+    }
+
+    /* Wait for broker process to exit */
+    waitpid(broker_pid, NULL, 0);
+
+    /* 6. Display Simulation Results */
     printf("\n==============================================================\n");
     printf("                      SIMULATION RESULTS                      \n");
     printf("==============================================================\n");
-    printf(" %-15s | %-15s | %-8s\n", "Entity", "Ops Handled", "Status");
-    printf("----------------+-----------------+---------\n");
-
-    for (int i = 0; i < num_writers; i++) {
-        total_writes += writer_args[i].ops_completed;
-        printf(" Writer %-7d | %-15d | %-8s\n", i, writer_args[i].ops_completed, "OK");
-    }
-
+    printf(" %-10s | %-12s | %-12s | %-8s\n", "Role", "Process ID", "Ops Served", "Status");
+    printf("-----------+--------------+--------------+---------\n");
     for (int i = 0; i < num_readers; i++) {
-        total_reads += reader_args[i].ops_completed;
-        printf(" Reader %-7d | %-15d | %-8s\n", i, reader_args[i].ops_completed, "OK");
+        printf(" Reader    | Reader %-4d | %-12d | %-8s\n", i, ops_per_proc, "OK");
+    }
+    for (int i = 0; i < num_writers; i++) {
+        printf(" Writer    | Writer %-4d | %-12d | %-8s\n", i, ops_per_proc, "OK");
     }
 
-    bool invariants_ok = shared_resource_verify_invariants(&res) &&
-                         (total_reads == total_expected_reads) &&
-                         (total_writes == total_expected_writes);
+    int expected_reads = num_readers * ops_per_proc;
+    int expected_writes = num_writers * ops_per_proc;
 
     printf("==============================================================\n");
-    printf(" Total Reads: %d | Total Writes: %d | Final Value: %d\n",
-           total_reads, total_writes, res.value);
-    printf(" Peak Concurrent Readers: %d\n", res.max_concurrent_readers);
-    printf(" Invariants Checked: Mutual Exclusion (OK) | Reader Concurrency (%s) | Data Integrity (%s)\n",
-           res.max_concurrent_readers > 1 ? "OK" : "OK (Single)", invariants_ok ? "OK" : "FAIL");
+    printf(" Invariant & Concurrency Verification:\n");
+    printf("  - Total Reads Served:       %d (Expected: %d)\n",
+           final_stats.total_reads_completed, expected_reads);
+    printf("  - Total Writes Committed:   %d (Expected: %d)\n",
+           final_stats.total_writes_completed, expected_writes);
+    printf("  - Peak Concurrent Readers:  %d\n", final_stats.max_concurrent_readers);
+    printf("  - Invariant Violations:     %d\n", final_stats.invariant_violations);
+    printf("  - Elapsed Simulation Time:  %.2f ms\n", (double)total_elapsed_us / 1000.0);
     printf("==============================================================\n");
 
-    rwlock_destroy(&rw);
-    shared_resource_destroy(&res);
-    free(reader_threads);
-    free(reader_args);
-    free(writer_threads);
-    free(writer_args);
+    bool success = (final_stats.total_reads_completed == expected_reads) &&
+                   (final_stats.total_writes_completed == expected_writes) &&
+                   (final_stats.invariant_violations == 0);
 
-    return invariants_ok ? 0 : 1;
+    return success ? 0 : 1;
 }

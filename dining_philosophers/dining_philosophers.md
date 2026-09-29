@@ -53,8 +53,8 @@ Originally formulated by Edsger Dijkstra in 1965 as an examination question rega
 4. **Tanenbaum's State-Based Two-Fork Semaphore Algorithm**
    * *Proposed by:* Andrew S. Tanenbaum (1987)
    * *Bibliographic Reference:*
-     * Tanenbaum, A. S. (1987). *Operating Systems: Design and Implementation* (1st ed.). Prentice-Hall. Chapter 2: "Processes", pp. 70–74.
-     * Tanenbaum, A. S., & Bos, H. (2015). *Modern Operating Systems* (4th ed.). Pearson. Chapter 2.5: "Classical IPC Problems", pp. 167–172.
+     * Tanenbaum, A. S. (1987). *Operating Systems: Design and Implementation* (1st ed.). Prentice-Hall. Chapter 2: "Processes", pp. 70–74. [https://dl.acm.org/doi/book/10.5555/26934](https://dl.acm.org/doi/book/10.5555/26934)
+     * Tanenbaum, A. S., & Bos, H. (2015). *Modern Operating Systems* (4th ed.). Pearson. Chapter 2.5: "Classical IPC Problems", pp. 167–172. [https://www.pearson.com/en-us/subject-catalog/p/modern-operating-systems/P200000003295](https://www.pearson.com/en-us/subject-catalog/p/modern-operating-systems/P200000003295)
    * *Mechanism:* Explicit states are tracked for every philosopher (*THINKING*, *HUNGRY*, *EATING*). A philosopher is only permitted to transition to *EATING* if neither of their immediate neighbors is currently eating (`test()` function). If blocked, the philosopher releases any claims and waits on a condition variable or individual synchronization barrier without retaining partial resources.
    * *Outcome:* Completely eliminates the "hold-and-wait" condition.
 
@@ -74,23 +74,13 @@ Originally formulated by Edsger Dijkstra in 1965 as an examination question rega
   * Dijkstra, E. W. (1965). *Cooperating Sequential Processes* (EWD123). Technological University, Eindhoven. [http://www.cs.utexas.edu/users/EWD/transcriptions/EWD01xx/EWD123.html](http://www.cs.utexas.edu/users/EWD/transcriptions/EWD01xx/EWD123.html)
 * **The Dining Philosophers Metaphor:**
   * Hoare, C. A. R. (1978). *Communicating Sequential Processes*. Communications of the ACM, 21(8), 666–677. [https://doi.org/10.1145/359576.359585](https://doi.org/10.1145/359576.359585)
-* **Resource Hierarchy & Deadlock Prevention Theory:**
-  * Havender, J. W. (1968). *Avoiding Deadlock in Multitasking Systems*. IBM Systems Journal, 7(2), 74–84. [https://doi.org/10.1147/sj.72.0074](https://doi.org/10.1147/sj.72.0074)
-  * Coffman, E. G., Elphick, M., & Shoshani, A. (1971). *System Deadlocks*. ACM Computing Surveys (CSUR), 3(2), 67–78. [https://doi.org/10.1145/356586.356588](https://doi.org/10.1145/356586.356588)
-* **State-Based Mutex & Monitor Formulations:**
-  * Tanenbaum, A. S. (1987). *Operating Systems: Design and Implementation*. Prentice-Hall. Chapter 2.
-  * Tanenbaum, A. S., & Bos, H. (2015). *Modern Operating Systems* (4th ed.). Pearson. Chapter 2.5.
-* **Distributed Synchronization & Graph Priority:**
-  * Chandy, K. M., & Misra, J. (1984). *The Drinking Philosophers Problem*. ACM Transactions on Programming Languages and Systems (TOPLAS), 6(4), 632–646. [https://doi.org/10.1145/863.864](https://doi.org/10.1145/863.864)
 * **Parallel Computing Context & Shared-Memory Contention:**
   * Eijkhout, V. (2022). *The Art of HPC, Book 1: The Science of Computing*. [https://theartofhpc.com/istc.html](https://theartofhpc.com/istc.html)
-  * Eijkhout, V. (2022). *The Art of HPC, Book 2: Parallel Programming for Science and Engineering*. [https://theartofhpc.com/pcse.html](https://theartofhpc.com/pcse.html)
-
 ---
 
 ## 5. Implemented Solution
 
-The implemented solution is based on an **autonomous process-based architecture** using **UNIX Domain Sockets (`AF_UNIX` via `socketpair`)** and a **Fair FIFO Request Ordering** mechanism managed by the Table Coordinator:
+The implemented solution is based on an **autonomous process-based architecture** using **UNIX Domain Sockets (`AF_UNIX` via `socketpair`)** and a **Fair FIFO Request Ordering** mechanism:
 
 * **Concurrency Model (Processes via `fork()`):**
   * Philosophers are completely isolated child processes created via `fork()`.

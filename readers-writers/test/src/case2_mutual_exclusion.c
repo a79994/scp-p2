@@ -1,122 +1,137 @@
 #include "test_runner.h"
 #include <stdio.h>
 #include <stdlib.h>
-#include <pthread.h>
+#include <unistd.h>
+#include <sys/wait.h>
 
 #define NUM_READERS 6
 #define NUM_WRITERS 3
-#define OPS_PER_THREAD 30
-#define ARRAY_SIZE 8
+#define OPS_PER_PROCESS 30
 
-typedef struct {
-    int data[ARRAY_SIZE];
-    int write_seq;
-} consistency_data_t;
+static void writer_proc(int id, int port) {
+    client_conn_t conn;
+    if (client_connect(&conn, "127.0.0.1", port, ROLE_WRITER, id) != 0) {
+        exit(1);
+    }
 
-static rwlock_t g_rw;
-static consistency_data_t g_shared;
-static int g_inconsistency_detected = 0;
-static pthread_mutex_t g_check_lock = PTHREAD_MUTEX_INITIALIZER;
-
-static void *writer_thread(void *arg) {
-    int id = *(int *)arg;
-    for (int i = 0; i < OPS_PER_THREAD; i++) {
+    for (int i = 0; i < OPS_PER_PROCESS; i++) {
         int token = (id + 1) * 1000 + i;
-
-        rwlock_write_lock(&g_rw);
-
-        /* Write incrementally with small delay to test mutual exclusion window */
-        for (int k = 0; k < ARRAY_SIZE; k++) {
-            g_shared.data[k] = token;
-            if (k == ARRAY_SIZE / 2) {
-                usleep(200); /* Deliberate window for any ill-behaved thread */
-            }
+        int32_t values[DATA_PAYLOAD_SIZE];
+        for (int k = 0; k < DATA_PAYLOAD_SIZE; k++) {
+            values[k] = token;
         }
-        g_shared.write_seq++;
 
-        rwlock_write_unlock(&g_rw);
+        int32_t ver = 0;
+        if (!client_publish(&conn, values, &ver)) {
+            exit(1);
+        }
         usleep(300);
     }
-    return NULL;
+
+    client_disconnect(&conn);
+    exit(0);
 }
 
-static void *reader_thread(void *arg) {
-    (void)arg;
-    for (int i = 0; i < OPS_PER_THREAD; i++) {
-        rwlock_read_lock(&g_rw);
+static void reader_proc(int id, int port) {
+    client_conn_t conn;
+    if (client_connect(&conn, "127.0.0.1", port, ROLE_READER, id) != 0) {
+        exit(1);
+    }
 
-        /* Verify all elements are identical (atomicity of writes) */
-        int expected = g_shared.data[0];
-        bool consistent = true;
-        for (int k = 1; k < ARRAY_SIZE; k++) {
-            if (g_shared.data[k] != expected) {
-                consistent = false;
+    int inconsistency_count = 0;
+
+    for (int i = 0; i < OPS_PER_PROCESS; i++) {
+        resource_snapshot_t snap;
+        if (!client_fetch(&conn, &snap)) {
+            exit(1);
+        }
+
+        /* Verify atomicity: all elements in the payload must be identical */
+        int expected = snap.values[0];
+        for (int k = 1; k < DATA_PAYLOAD_SIZE; k++) {
+            if (snap.values[k] != expected) {
+                inconsistency_count++;
+                fprintf(stderr, COLOR_RED "[FAIL] Reader %d detected inconsistent data! values[0]=%d, values[%d]=%d\n" COLOR_RESET,
+                        id, expected, k, snap.values[k]);
                 break;
             }
         }
-
-        rwlock_read_unlock(&g_rw);
-
-        if (!consistent) {
-            pthread_mutex_lock(&g_check_lock);
-            g_inconsistency_detected++;
-            pthread_mutex_unlock(&g_check_lock);
-        }
-
         usleep(200);
     }
-    return NULL;
+
+    client_disconnect(&conn);
+    exit(inconsistency_count > 0 ? 2 : 0);
 }
 
 int main(void) {
-    printf(COLOR_CYAN "=== [TEST CASE 2] Strict Mutual Exclusion & No Dirty Reads ===" COLOR_RESET "\n");
-    init_test_watchdog(10);
+    printf(COLOR_CYAN "=== [TEST CASE 2] Strict Mutual Exclusion & Data Atomicity ===" COLOR_RESET "\n");
+    init_test_watchdog(15);
 
-    if (rwlock_init(&g_rw) != 0) {
-        fprintf(stderr, COLOR_RED "[FAIL] Failed to initialize rwlock!\n" COLOR_RESET);
+    broker_server_t broker;
+    if (broker_init(&broker, 0, false) != 0) {
+        fprintf(stderr, COLOR_RED "[FAIL] Failed to initialize broker!\n" COLOR_RESET);
+        return 1;
+    }
+    int port = broker_get_port(&broker);
+
+    if (broker_start(&broker) != 0) {
+        fprintf(stderr, COLOR_RED "[FAIL] Failed to start broker!\n" COLOR_RESET);
         return 1;
     }
 
-    for (int k = 0; k < ARRAY_SIZE; k++) {
-        g_shared.data[k] = 0;
-    }
-    g_shared.write_seq = 0;
-
-    pthread_t readers[NUM_READERS];
-    pthread_t writers[NUM_WRITERS];
-    int r_ids[NUM_READERS];
-    int w_ids[NUM_WRITERS];
-
-    for (int i = 0; i < NUM_WRITERS; i++) {
-        w_ids[i] = i;
-        pthread_create(&writers[i], NULL, writer_thread, &w_ids[i]);
-    }
+    pid_t readers[NUM_READERS];
+    pid_t writers[NUM_WRITERS];
 
     for (int i = 0; i < NUM_READERS; i++) {
-        r_ids[i] = i;
-        pthread_create(&readers[i], NULL, reader_thread, &r_ids[i]);
+        readers[i] = fork();
+        if (readers[i] == 0) {
+            reader_proc(i, port);
+        }
     }
 
     for (int i = 0; i < NUM_WRITERS; i++) {
-        pthread_join(writers[i], NULL);
+        writers[i] = fork();
+        if (writers[i] == 0) {
+            writer_proc(i, port);
+        }
     }
+
+    int failures = 0;
     for (int i = 0; i < NUM_READERS; i++) {
-        pthread_join(readers[i], NULL);
+        int status;
+        waitpid(readers[i], &status, 0);
+        if (WIFEXITED(status) && WEXITSTATUS(status) != 0) {
+            failures++;
+        }
+    }
+    for (int i = 0; i < NUM_WRITERS; i++) {
+        int status;
+        waitpid(writers[i], &status, 0);
+        if (WIFEXITED(status) && WEXITSTATUS(status) != 0) {
+            failures++;
+        }
     }
 
     cancel_test_watchdog();
 
-    printf(" Checking results:\n");
-    printf("  - Total completed writes: %d\n", g_shared.write_seq);
-    printf("  - Inconsistency / Dirty read occurrences: %d\n", g_inconsistency_detected);
+    client_conn_t admin;
+    broker_telemetry_t stats;
+    if (client_connect(&admin, "127.0.0.1", port, ROLE_ADMIN, 999) == 0) {
+        client_query_stats(&admin, &stats);
+        client_disconnect(&admin);
+    }
+    broker_stop(&broker);
 
-    if (g_inconsistency_detected > 0) {
-        fprintf(stderr, COLOR_RED "[FAIL] Inconsistency detected! Reader observed partial write.\n" COLOR_RESET);
-        rwlock_destroy(&g_rw);
+    printf(" Checking results:\n");
+    printf("  - Invariant violations: %d\n", stats.invariant_violations);
+    printf("  - Process exit failures: %d\n", failures);
+    printf("  - Peak concurrent readers: %d\n", stats.max_concurrent_readers);
+
+    if (failures > 0 || stats.invariant_violations != 0) {
+        fprintf(stderr, COLOR_RED "[FAIL] Case 2 failed: Mutual exclusion violated or torn reads detected!\n" COLOR_RESET);
         return 1;
     }
 
-    rwlock_destroy(&g_rw);
-    printf(COLOR_GREEN "[PASS] Case 2 passed: Strict mutual exclusion and atomicity verified.\n" COLOR_RESET);
+    printf(COLOR_GREEN "[PASS] Case 2 passed: Strict mutual exclusion and write atomicity guaranteed.\n" COLOR_RESET);
     return 0;
 }

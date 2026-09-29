@@ -3,17 +3,21 @@
 
 #define _DEFAULT_SOURCE
 #define _POSIX_C_SOURCE 200809L
-#include "rwlock.h"
+#include "protocol.h"
+#include "broker.h"
+#include "client.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdbool.h>
 #include <unistd.h>
 #include <signal.h>
+#include <sys/wait.h>
 
 #define COLOR_RESET   "\033[0m"
 #define COLOR_RED     "\033[1;31m"
 #define COLOR_GREEN   "\033[1;32m"
 #define COLOR_CYAN    "\033[1;36m"
+#define COLOR_YELLOW  "\033[1;33m"
 
 static inline void timeout_watchdog_handler(int sig) {
     (void)sig;

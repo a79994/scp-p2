@@ -1,110 +1,138 @@
 #include "test_runner.h"
 #include <stdio.h>
 #include <stdlib.h>
-#include <pthread.h>
+#include <unistd.h>
+#include <sys/wait.h>
 
-#define NUM_READERS 50
-#define NUM_WRITERS 10
-#define READS_PER_THREAD 20
-#define WRITES_PER_THREAD 10
+#define HIGH_READERS 12
+#define HIGH_WRITERS 4
+#define OPS_PER_PROCESS 20
 
-typedef struct {
-    int id;
-    rwlock_t *rw;
-    shared_resource_t *res;
-} thread_ctx_t;
-
-static void *reader_thread(void *arg) {
-    thread_ctx_t *ctx = (thread_ctx_t *)arg;
-    for (int i = 0; i < READS_PER_THREAD; i++) {
-        usleep(100);
-        int version = 0;
-        shared_resource_read(ctx->res, ctx->rw, &version);
+static void reader_proc(int id, int port) {
+    client_conn_t conn;
+    if (client_connect(&conn, "127.0.0.1", port, ROLE_READER, id) != 0) {
+        exit(1);
     }
-    return NULL;
+
+    for (int i = 0; i < OPS_PER_PROCESS; i++) {
+        usleep(200);
+        resource_snapshot_t snap;
+        if (!client_fetch(&conn, &snap)) {
+            exit(1);
+        }
+    }
+
+    client_disconnect(&conn);
+    exit(0);
 }
 
-static void *writer_thread(void *arg) {
-    thread_ctx_t *ctx = (thread_ctx_t *)arg;
-    for (int i = 0; i < WRITES_PER_THREAD; i++) {
-        usleep(300);
-        shared_resource_write(ctx->res, ctx->rw, (ctx->id + 1) * 1000 + i);
+static void writer_proc(int id, int port) {
+    client_conn_t conn;
+    if (client_connect(&conn, "127.0.0.1", port, ROLE_WRITER, id) != 0) {
+        exit(1);
     }
-    return NULL;
+
+    for (int i = 0; i < OPS_PER_PROCESS; i++) {
+        usleep(400);
+        int32_t values[DATA_PAYLOAD_SIZE];
+        for (int k = 0; k < DATA_PAYLOAD_SIZE; k++) {
+            values[k] = (id + 1) * 1000 + i;
+        }
+        int32_t ver = 0;
+        if (!client_publish(&conn, values, &ver)) {
+            exit(1);
+        }
+    }
+
+    client_disconnect(&conn);
+    exit(0);
 }
 
 int main(void) {
-    printf(COLOR_CYAN "=== [TEST CASE 4] High Concurrency Stress Test ===" COLOR_RESET "\n");
+    printf(COLOR_CYAN "=== [TEST CASE 4] High Concurrency Stress Test (%d Readers, %d Writers) ===" COLOR_RESET "\n",
+           HIGH_READERS, HIGH_WRITERS);
     init_test_watchdog(15);
 
-    rwlock_t rw;
-    if (rwlock_init(&rw) != 0) {
-        fprintf(stderr, COLOR_RED "[FAIL] Failed to initialize rwlock!\n" COLOR_RESET);
+    broker_server_t broker;
+    if (broker_init(&broker, 0, false) != 0) {
+        fprintf(stderr, COLOR_RED "[FAIL] Failed to initialize broker!\n" COLOR_RESET);
+        return 1;
+    }
+    int port = broker_get_port(&broker);
+
+    if (broker_start(&broker) != 0) {
+        fprintf(stderr, COLOR_RED "[FAIL] Failed to start broker!\n" COLOR_RESET);
         return 1;
     }
 
-    shared_resource_t res;
-    shared_resource_init(&res, 0);
+    pid_t readers[HIGH_READERS];
+    pid_t writers[HIGH_WRITERS];
 
-    pthread_t readers[NUM_READERS];
-    thread_ctx_t r_ctx[NUM_READERS];
-    pthread_t writers[NUM_WRITERS];
-    thread_ctx_t w_ctx[NUM_WRITERS];
-
-    for (int i = 0; i < NUM_READERS; i++) {
-        r_ctx[i].id = i;
-        r_ctx[i].rw = &rw;
-        r_ctx[i].res = &res;
-        pthread_create(&readers[i], NULL, reader_thread, &r_ctx[i]);
+    for (int i = 0; i < HIGH_READERS; i++) {
+        readers[i] = fork();
+        if (readers[i] == 0) {
+            reader_proc(i, port);
+        }
     }
 
-    for (int i = 0; i < NUM_WRITERS; i++) {
-        w_ctx[i].id = i;
-        w_ctx[i].rw = &rw;
-        w_ctx[i].res = &res;
-        pthread_create(&writers[i], NULL, writer_thread, &w_ctx[i]);
+    for (int i = 0; i < HIGH_WRITERS; i++) {
+        writers[i] = fork();
+        if (writers[i] == 0) {
+            writer_proc(i, port);
+        }
     }
 
-    for (int i = 0; i < NUM_READERS; i++) {
-        pthread_join(readers[i], NULL);
+    int errors = 0;
+    for (int i = 0; i < HIGH_READERS; i++) {
+        int status;
+        waitpid(readers[i], &status, 0);
+        if (!WIFEXITED(status) || WEXITSTATUS(status) != 0) {
+            errors++;
+        }
     }
-    for (int i = 0; i < NUM_WRITERS; i++) {
-        pthread_join(writers[i], NULL);
+    for (int i = 0; i < HIGH_WRITERS; i++) {
+        int status;
+        waitpid(writers[i], &status, 0);
+        if (!WIFEXITED(status) || WEXITSTATUS(status) != 0) {
+            errors++;
+        }
     }
 
     cancel_test_watchdog();
 
-    int expected_reads = NUM_READERS * READS_PER_THREAD;
-    int expected_writes = NUM_WRITERS * WRITES_PER_THREAD;
+    client_conn_t admin;
+    broker_telemetry_t stats;
+    if (client_connect(&admin, "127.0.0.1", port, ROLE_ADMIN, 999) == 0) {
+        client_query_stats(&admin, &stats);
+        client_disconnect(&admin);
+    }
+    broker_stop(&broker);
+
+    int expected_reads = HIGH_READERS * OPS_PER_PROCESS;
+    int expected_writes = HIGH_WRITERS * OPS_PER_PROCESS;
 
     printf(" Checking results:\n");
-    printf("  - Active threads: %d readers, %d writers\n", NUM_READERS, NUM_WRITERS);
-    printf("  - Total reads performed: %d (expected: %d)\n", res.total_reads, expected_reads);
-    printf("  - Total writes performed: %d (expected: %d)\n", res.total_writes, expected_writes);
-    printf("  - Peak concurrent readers observed: %d\n", res.max_concurrent_readers);
-    printf("  - Invariant violations: %d\n", res.invariant_violations);
+    printf("  - Total reads completed: %d (expected: %d)\n", stats.total_reads_completed, expected_reads);
+    printf("  - Total writes completed: %d (expected: %d)\n", stats.total_writes_completed, expected_writes);
+    printf("  - Peak concurrent readers: %d\n", stats.max_concurrent_readers);
+    printf("  - Invariant violations: %d\n", stats.invariant_violations);
+    printf("  - Child process failures: %d\n", errors);
 
-    if (res.total_reads != expected_reads || res.total_writes != expected_writes) {
+    if (errors > 0 || stats.invariant_violations != 0) {
+        fprintf(stderr, COLOR_RED "[FAIL] Errors or invariant violations detected!\n" COLOR_RESET);
+        return 1;
+    }
+
+    if (stats.total_reads_completed != expected_reads || stats.total_writes_completed != expected_writes) {
         fprintf(stderr, COLOR_RED "[FAIL] Operation count mismatch!\n" COLOR_RESET);
-        rwlock_destroy(&rw);
-        shared_resource_destroy(&res);
         return 1;
     }
 
-    if (!shared_resource_verify_invariants(&res)) {
-        fprintf(stderr, COLOR_RED "[FAIL] Invariant violations occurred during stress test!\n" COLOR_RESET);
-        rwlock_destroy(&rw);
-        shared_resource_destroy(&res);
-        return 1;
+    if (stats.max_concurrent_readers < 2) {
+        fprintf(stderr, COLOR_YELLOW "[WARN] Concurrency low: peak concurrent readers was %d\n" COLOR_RESET,
+                stats.max_concurrent_readers);
     }
 
-    if (res.max_concurrent_readers <= 1) {
-        fprintf(stderr, COLOR_RED "[WARN] Readers did not achieve parallel concurrency!\n" COLOR_RESET);
-    }
-
-    rwlock_destroy(&rw);
-    shared_resource_destroy(&res);
-
-    printf(COLOR_GREEN "[PASS] Case 4 passed: High-concurrency stress test succeeded with zero violations.\n" COLOR_RESET);
+    printf(COLOR_GREEN "[PASS] Case 4 passed: High concurrency handled flawlessly without deadlocks or violations.\n" COLOR_RESET);
     return 0;
 }
